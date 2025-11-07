@@ -19,7 +19,13 @@ const kBrandGreen = Color(0xFF669340);
 const kDarkGray   = Color(0xFF32384A);
 const kWhite      = Color(0xFFFFFFFF);
 
-const String kStrapiBaseUrl = 'http://192.168.15.17:1337';
+// --- CORES DO FIGMA ---
+const kFigmaSearchHint = Color(0xFFBCC1A6);
+const kFigmaSearchFill = Color(0xFFFFFFE9); 
+const kFigmaBellBg     = Color(0xFFF5F7EB);
+// --- FIM NOVAS CORES ---
+
+const String kStrapiBaseUrl = 'http://192.168.15.12:1337';
 
 const String kParksCollection = 'parks';
 const String kActivitiesCollection = 'activities';
@@ -30,13 +36,13 @@ const _CollectionFields kParksFields = _CollectionFields(
   title: ['title', 'name', 'nome'],
   image: ['image', 'hero_image', 'capa', 'banner', 'foto', 'imagem'],
   status: ['status', 'situacao'],
-  slug: ['slug', 'id_parque', 'id'],
+  slug: ['slug', 'id_parque', 'id'], // 'slug' ou 'id_parque' é o documentId
 );
 const _CollectionFields kActivitiesFields = _CollectionFields(
   title: ['titulo', 'name', 'title', 'nome'],
   image: ['hero_image', 'image', 'capa', 'banner', 'foto', 'imagem'],
   status: ['status', 'situacao'],
-  slug: ['slug', 'id_atividade', 'id'],
+  slug: ['slug', 'id_atividade', 'id'], // 'slug' ou 'id_atividade' é o documentId
 );
 
 /* ================== HOME SCREEN ================== */
@@ -44,12 +50,7 @@ const _CollectionFields kActivitiesFields = _CollectionFields(
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
-    this.userName,
-    this.isLoggedIn = false,
   });
-
-  final String? userName;
-  final bool isLoggedIn;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -74,10 +75,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _setupFavs() async {
-    await FavoritesService.instance.init();
+    // Carrega os favoritos salvos no app
+    await FavoritesService.instance.init(); 
   }
 
   Future<void> _loadAll() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _error = null;
@@ -89,7 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
         fields: kParksFields,
         limit: 12,
         sort: ['nome'],
-        isPark: true, 
+        isPark: true,
       );
 
       final activities = await _fetchCollection(
@@ -100,12 +103,14 @@ class _HomeScreenState extends State<HomeScreen> {
         isPark: false,
       );
 
+      if (!mounted) return;
       setState(() {
         explorar = parks;
         divertir = activities;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _isLoading = false;
@@ -122,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }) async {
     final qp = <String, String>{
       'limit': '$limit',
-      'populate': '*', 
+      'populate': '*',
     };
     if (sort.isNotEmpty) qp['sort'] = sort.join(',');
 
@@ -147,20 +152,26 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final raw in data) {
       if (raw is! Map) continue;
 
-      // <<-- CORREÇÃO FINAL AQUI -->>
-      // Seus dados não usam 'attributes', então usamos o objeto 'raw' diretamente.
-      final id = '${raw['id']}';
-      final map = raw as Map<String, dynamic>;
+      final map = raw.cast<String, dynamic>();
+      // v5: { id: 1, documentId: 'xxx', nome: '...', ... }
+      final attributes = (map['attributes'] is Map) ? Map<String, dynamic>.from(map['attributes']) : map;
 
-      final title = _firstNonEmpty(map, fields.title) ?? 'Sem título';
-      final status = _firstNonEmpty(map, fields.status);
-      final slug = _firstNonEmpty(map, fields.slug) ?? id;
+      final idNum = (map['id'] is int) ? map['id'] : int.tryParse('${map['id']}');
+      
+      // Usa o 'documentId' (slug) ou 'id' como o ID de navegação/favorito
+      final docId = (map['documentId'] ?? attributes['documentId'] ?? _firstNonEmpty(attributes, fields.slug))?.toString();
+      
+      // Garante que temos um ID (seja o docId ou o numérico)
+      final primaryId = (docId != null && docId.isNotEmpty) ? docId : idNum.toString();
 
-      final imageVal = _resolveImageValue(map, fields.image);
+      final title = _firstNonEmpty(attributes, fields.title) ?? 'Sem título';
+      final status = _firstNonEmpty(attributes, fields.status);
+
+      final imageVal = _resolveImageValue(attributes, fields.image);
       final imageUrl = _toImageUrl(imageVal);
 
       items.add(_CardItem(
-        id: slug,
+        id: primaryId, // ID principal (usado para navegação E favoritos)
         title: title,
         image: imageUrl ?? '',
         status: status,
@@ -171,18 +182,28 @@ class _HomeScreenState extends State<HomeScreen> {
     return items;
   }
 
+  /// Tenta resolver campo de imagem em formatos comuns (url direta, media v4/v5, arrays)
   static dynamic _resolveImageValue(Map<String, dynamic> map, List<String> candidates) {
     for (final key in candidates) {
-      if (map.containsKey(key) && map[key] != null) {
-        final val = map[key];
+      if (!map.containsKey(key) || map[key] == null) continue;
+      final val = map[key];
 
-        // <<-- CORREÇÃO FINAL AQUI -->>
-        // Acessa a URL da imagem diretamente, pois seus dados não usam 'data'/'attributes' aqui.
-        if (val is Map && val.containsKey('url')) {
-          return val['url'];
+      if (val is String) return val;
+      if (val is Map && val['url'] != null) return val['url'];
+
+      if (val is Map && val['data'] != null) {
+        final data = val['data'];
+        if (data is Map) {
+          final attrs = data['attributes'];
+          if (attrs is Map && attrs['url'] != null) return attrs['url'];
         }
-        
-        return val;
+        if (data is List && data.isNotEmpty) {
+          final first = data.first;
+          if (first is Map) {
+            final attrs = first['attributes'];
+            if (attrs is Map && attrs['url'] != null) return attrs['url'];
+          }
+        }
       }
     }
     return null;
@@ -194,7 +215,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (v.isEmpty) return null;
     if (v.startsWith('http://') || v.startsWith('https://')) return v;
     if (v.startsWith('/')) return '$kStrapiBaseUrl$v';
-    return '$kStrapiBaseUrl/assets/$v';
+    // Ajustado para o caminho de upload padrão do Strapi
+    return '$kStrapiBaseUrl$v'; 
   }
 
   static String? _firstNonEmpty(Map<String, dynamic> map, List<String> candidates) {
@@ -221,11 +243,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Boa noite';
   }
 
-  String _tituloDinamico() {
-    final hasName = widget.isLoggedIn && (widget.userName?.trim().isNotEmpty ?? false);
-    return hasName ? widget.userName!.trim() : _saudacaoDia();
-  }
-
   List<_CardItem> _applyFilter(List<_CardItem> items) {
     if (_query.isEmpty) return items;
     final q = _query.toLowerCase();
@@ -234,22 +251,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-
     const headerTitleSize = 20.0;
     const headerTitleLineHeight = 1.5;
     const headerSubtitleSize = 16.0;
 
-    final double exploreCardWidth = (w * 0.88).clamp(260.0, 320.0).toDouble();
-    const exploreCardHeight = 240.0;
-    const exploreCardRadius = 24.0;
+    const double exploreCardWidth = 282.0;
+    const double exploreCardHeight = 300.0;
+    const double exploreCardRadius = 8.0;
 
-    final double smallLaneWidth = (w - 40);
-    final double smallCardWidth = (smallLaneWidth * 0.82).toDouble();
-    const smallCardHeight = 220.0;
-    const smallCardRadius = 22.0;
-
-    const quickSize = 84.0;
+    const double smallCardWidth = 282.0;
+    const double smallCardHeight = 300.0;
+    const double smallCardRadius = 8.0;
+    
+    const quickSize = 80.0;
     const quickRadius = 24.0;
 
     return Scaffold(
@@ -262,177 +276,219 @@ class _HomeScreenState extends State<HomeScreen> {
                 : CustomScrollView(
                     slivers: [
                       SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Header
-                              Row(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        RichText(
-                                          text: TextSpan(
-                                            children: [
-                                              TextSpan(
-                                                text: 'Olá, ',
-                                                style: GoogleFonts.poppins(
-                                                  fontSize: headerTitleSize,
-                                                  fontWeight: FontWeight.w400,
-                                                  color: Colors.black,
-                                                  height: headerTitleLineHeight,
-                                                ),
+                                  // HEADER
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center, 
+                                    children: [
+                                      const _Avatar(), 
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            RichText(
+                                              text: TextSpan(
+                                                children: [
+                                                  TextSpan(
+                                                    text: 'Oi, ', 
+                                                    style: GoogleFonts.poppins(
+                                                      fontSize: headerTitleSize,
+                                                      fontWeight: FontWeight.w400,
+                                                      color: Colors.black,
+                                                      height: headerTitleLineHeight,
+                                                    ),
+                                                  ),
+                                                  WidgetSpan(
+                                                    alignment: PlaceholderAlignment.baseline,
+                                                    baseline: TextBaseline.alphabetic,
+                                                    child: FutureBuilder<Map<String, dynamic>?>(
+                                                      future: AuthService.instance.me(),
+                                                      builder: (context, snapshot) {
+                                                        String displayName = _saudacaoDia();
+                                                        if (snapshot.hasData && snapshot.data != null) {
+                                                          final me = snapshot.data!;
+                                                          final nome = me['name'] ?? me['username'] ?? me['first_name'];
+                                                          if (nome != null && nome.toString().isNotEmpty) {
+                                                            displayName = nome.toString().split(' ').first;
+                                                          }
+                                                        }
+                                                        return Text(
+                                                          displayName,
+                                                          style: GoogleFonts.poppins(
+                                                            fontSize: headerTitleSize,
+                                                            fontWeight: FontWeight.w700,
+                                                            color: kBrandGreen,
+                                                            height: headerTitleLineHeight,
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                              TextSpan(
-                                                text: _tituloDinamico(),
-                                                style: GoogleFonts.poppins(
-                                                  fontSize: headerTitleSize,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: kBrandGreen,
-                                                  height: headerTitleLineHeight,
-                                                ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'Para onde vamos hoje?',
+                                              style: GoogleFonts.poppins(
+                                                fontSize: headerSubtitleSize,
+                                                color: kDarkGray.withOpacity(.7),
+                                                height: 1.25,
                                               ),
-                                            ],
-                                          ),
+                                            ),
+                                          ],
                                         ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          'Para onde vamos hoje?',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: headerSubtitleSize,
-                                            color: kDarkGray.withOpacity(.7),
-                                            height: 1.25,
-                                          ),
-                                        ),
-                                      ],
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const _NotificationBell(), 
+                                    ],
+                                  ),
+                                  const SizedBox(height: 40), 
+
+                                  // BUSCA
+                                  _SearchBar(
+                                    controller: _search,
+                                    hint: 'O que você está procurando?',
+                                    borderColor: kBrandGreen, 
+                                    onSubmitted: (text) => setState(() => _query = text.trim()),
+                                  ),
+                                  const SizedBox(height: 16), 
+
+                                  // ATALHOS
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center, 
+                                    children: [
+                                      _QuickAction(
+                                        iconAsset: 'assets/icons/Map.svg',
+                                        label: 'Mapa',
+                                        color: kBrandGreen,
+                                        size: quickSize,
+                                        radius: quickRadius,
+                                        onTap: () => context.go(AppRoutes.map),
+                                      ),
+                                      const SizedBox(width: 20), 
+                                      _QuickAction(
+                                        iconAsset: 'assets/icons/Calendar_Check.svg',
+                                        label: 'Reservas',
+                                        color: kBrandGreen,
+                                        size: quickSize,
+                                        radius: quickRadius,
+                                        onTap: () => context.push(AppRoutes.homeReservas),
+                                      ),
+                                      const SizedBox(width: 20), 
+                                      _QuickAction(
+                                        iconAsset: 'assets/icons/calendar.svg',
+                                        label: 'Eventos',
+                                        color: kBrandGreen,
+                                        size: quickSize,
+                                        radius: quickRadius,
+                                        onTap: () => context.push(AppRoutes.homeEventos),
+                                      ),
+                                      const SizedBox(width: 20), 
+                                      _QuickAction(
+                                        iconAsset: 'assets/icons/info.svg',
+                                        label: 'Info',
+                                        color: kBrandGreen,
+                                        size: quickSize,
+                                        radius: quickRadius,
+                                        onTap: () => context.push(AppRoutes.homeInfo),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 40), 
+
+                                  // TÍTULO VEM EXPLORAR
+                                  _SectionTitle(
+                                    title: 'Vem explorar',
+                                    subtitle: 'Encontre o parque perfeito para sua próxima aventura!',
+                                    color: kBrandGreen,
+                                    subtitleColor: kDarkGray.withOpacity(.7),
+                                  ),
+                                  const SizedBox(height: 16),
+                                ],
+                              ),
+                            ),
+                            
+                            // LISTA VEM EXPLORAR
+                            SizedBox(
+                              height: exploreCardHeight, 
+                              child: _applyFilter(explorar).isEmpty
+                                  ? const _EmptyLane()
+                                  : ListView.separated(
+                                      scrollDirection: Axis.horizontal,
+                                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                                      itemBuilder: (context, i) {
+                                        final item = _applyFilter(explorar)[i];
+                                        return _ExploreCard( 
+                                          item: item,
+                                          color: kBrandGreen,
+                                          badgeColor: kWhite,
+                                          width: exploreCardWidth, 
+                                          height: exploreCardHeight, 
+                                          radius: exploreCardRadius, 
+                                          imageProviderFrom: _imageProviderFrom,
+                                          onTap: () => context.push(AppRoutes.homePark(item.id)),
+                                        );
+                                      },
+                                      separatorBuilder: (_, __) => const SizedBox(width: 16),
+                                      itemCount: _applyFilter(explorar).length,
                                     ),
-                                  ),
-                                  const _Avatar(),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
+                            ),
 
-                              // Busca
-                              _SearchBar(
-                                controller: _search,
-                                hint: 'O que você está procurando?',
-                                borderColor: kBrandGreen,
-                                onSubmitted: (text) => setState(() => _query = text.trim()),
-                              ),
-                              const SizedBox(height: 12),
-
-                              // Atalhos
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            // TÍTULO VEM SE DIVERTIR
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  _QuickAction(
-                                    iconAsset: 'assets/icons/Map.svg',
-                                    label: 'Mapa',
-                                    color: kBrandGreen,
-                                    size: quickSize,
-                                    radius: quickRadius,
-                                    onTap: () => context.go(AppRoutes.map),
+                                  const SizedBox(height: 28),
+                                  const _SectionHeader(label: 'Vem se divertir', color: kBrandGreen),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Diversão para todas as idades, do nascer ao pôr do sol.',
+                                    style: GoogleFonts.poppins(fontSize: 14, color: kDarkGray.withOpacity(.7), height: 1.3),
                                   ),
-                                  _QuickAction(
-                                    iconAsset: 'assets/icons/Calendar_Check.svg',
-                                    label: 'Reservas',
-                                    color: kBrandGreen,
-                                    size: quickSize,
-                                    radius: quickRadius,
-                                    onTap: () => context.push(AppRoutes.homeReservas),
-                                  ),
-                                  _QuickAction(
-                                    iconAsset: 'assets/icons/calendar.svg',
-                                    label: 'Eventos',
-                                    color: kBrandGreen,
-                                    size: quickSize,
-                                    radius: quickRadius,
-                                    onTap: () => context.push(AppRoutes.homeEventos),
-                                  ),
-                                  _QuickAction(
-                                    iconAsset: 'assets/icons/info.svg',
-                                    label: 'Info',
-                                    color: kBrandGreen,
-                                    size: quickSize,
-                                    radius: quickRadius,
-                                    onTap: () => context.push(AppRoutes.homeInfo),
-                                  ),
+                                  const SizedBox(height: 16),
                                 ],
                               ),
-                              const SizedBox(height: 24),
-
-                              // Vem explorar (Parques)
-                              _SectionTitle(
-                                title: 'Vem explorar',
-                                subtitle: 'Encontre o parque perfeito para sua próxima aventura!',
-                                color: kBrandGreen,
-                                subtitleColor: kDarkGray.withOpacity(.7),
-                              ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                height: exploreCardHeight,
-                                child: _applyFilter(explorar).isEmpty
-                                    ? const _EmptyLane()
-                                    : ListView.separated(
-                                        scrollDirection: Axis.horizontal,
-                                        padding: const EdgeInsets.only(left: 20, right: 20),
-                                        itemBuilder: (context, i) {
-                                          final item = _applyFilter(explorar)[i];
-                                          return _ExploreCard(
-                                            item: item,
-                                            color: kBrandGreen,
-                                            badgeColor: kWhite,
-                                            width: exploreCardWidth,
-                                            height: exploreCardHeight,
-                                            radius: exploreCardRadius,
-                                            imageProviderFrom: _imageProviderFrom,
-                                            onTap: () => context.push(AppRoutes.homePark(item.id)),
-                                          );
-                                        },
-                                        separatorBuilder: (_, __) => const SizedBox(width: 16),
-                                        itemCount: _applyFilter(explorar).length,
-                                      ),
-                              ),
-                              const SizedBox(height: 28),
-
-                              // Vem se divertir (Atividades)
-                              const _SectionHeader(label: 'Vem se divertir', color: kBrandGreen),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Diversão para todas as idades, do nascer ao pôr do sol.',
-                                style: GoogleFonts.poppins(fontSize: 13, color: kDarkGray.withOpacity(.7), height: 1.3),
-                              ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                height: smallCardHeight,
-                                child: _applyFilter(divertir).isEmpty
-                                    ? const _EmptyLane()
-                                    : ListView.separated(
-                                        scrollDirection: Axis.horizontal,
-                                        padding: const EdgeInsets.only(left: 20, right: 20),
-                                        itemBuilder: (context, i) {
-                                          final item = _applyFilter(divertir)[i];
-                                          return _ActivityCard(
-                                            item: item,
-                                            favoriteAccent: kBrandGreen,
-                                            width: smallCardWidth,
-                                            height: smallCardHeight,
-                                            radius: smallCardRadius,
-                                            imageProviderFrom: _imageProviderFrom,
-                                          );
-                                        },
-                                        separatorBuilder: (_, __) => const SizedBox(width: 16),
-                                        itemCount: _applyFilter(divertir).length,
-                                      ),
-                              ),
-
-                              const SizedBox(height: 28),
-                            ],
-                          ),
+                            ),
+                            
+                            // LISTA VEM SE DIVERTIR
+                            SizedBox(
+                              height: smallCardHeight, 
+                              child: _applyFilter(divertir).isEmpty
+                                  ? const _EmptyLane()
+                                  : ListView.separated(
+                                      scrollDirection: Axis.horizontal,
+                                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                                      itemBuilder: (context, i) {
+                                        final item = _applyFilter(divertir)[i];
+                                        return _ExploreCard(
+                                          item: item,
+                                          color: kBrandGreen,
+                                          badgeColor: kWhite,
+                                          width: smallCardWidth, 
+                                          height: smallCardHeight, 
+                                          radius: smallCardRadius, 
+                                          imageProviderFrom: _imageProviderFrom,
+                                          onTap: null, 
+                                        );
+                                      },
+                                      separatorBuilder: (_, __) => const SizedBox(width: 16),
+                                      itemCount: _applyFilter(divertir).length,
+                                    ),
+                            ),
+                            
+                            const SizedBox(height: 28),
+                          ],
                         ),
                       ),
                     ],
@@ -530,10 +586,52 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const CircleAvatar(
-      radius: 20,
-      backgroundImage: NetworkImage(
-        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200',
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: AuthService.instance.me(),
+      builder: (context, snapshot) {
+        String? avatarUrl;
+        if (snapshot.hasData && snapshot.data != null) {
+          final me = snapshot.data!;
+          final avatarData = me['avatar'];
+          if (avatarData is Map && avatarData['url'] != null) {
+             String url = avatarData['url'];
+             if (!url.startsWith('http')) {
+               url = '$kStrapiBaseUrl$url';
+             }
+             avatarUrl = url;
+          }
+        }
+
+        return CircleAvatar(
+          // --- CORREÇÃO: Raio 24 para ficar 48x48 ---
+          radius: 24,
+          backgroundColor: const Color(0xFFE1E1E5), // CSS #E1E1E5
+          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+          child: avatarUrl == null
+              ? const Icon(Icons.person, color: Colors.white70, size: 24) // Ícone menor
+              : null,
+        );
+      },
+    );
+  }
+}
+
+class _NotificationBell extends StatelessWidget {
+  const _NotificationBell();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40, 
+      height: 40, 
+      decoration: const BoxDecoration(
+        color: kFigmaBellBg, 
+        shape: BoxShape.circle, 
+      ),
+      child: const Icon(
+        Icons.notifications_none_outlined,
+        color: kBrandGreen, 
+        size: 24, 
       ),
     );
   }
@@ -555,32 +653,32 @@ class _SearchBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final border = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(28),
-      borderSide: BorderSide(color: borderColor, width: 1.6),
+      borderRadius: BorderRadius.circular(16),
+      borderSide: const BorderSide(color: kBrandGreen, width: 2.0),
     );
 
     return TextField(
       controller: controller,
       onSubmitted: onSubmitted,
       textInputAction: TextInputAction.search,
-      style: GoogleFonts.poppins(fontSize: 14, color: const Color(0xFF32384A)),
+      style: GoogleFonts.poppins(fontSize: 14, color: kDarkGray),
       decoration: InputDecoration(
+        filled: true, 
+        fillColor: kFigmaSearchFill, 
         hintText: hint,
-        hintStyle: GoogleFonts.poppins(color: const Color(0xFF9AA0A6)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        hintStyle: GoogleFonts.poppins(color: kFigmaSearchHint),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
         enabledBorder: border,
-        focusedBorder: border,
-        suffixIcon: Padding(
-          padding: const EdgeInsets.only(right: 6),
-          child: Container(
-            width: 44,
-            height: 44,
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            decoration: BoxDecoration(color: borderColor, borderRadius: BorderRadius.circular(22)),
-            child: const Icon(Icons.search_rounded, color: Colors.white, size: 22),
+        focusedBorder: border, 
+        suffixIcon: const Padding(
+          padding: EdgeInsets.only(right: 12.0),
+          child: Icon(
+            Icons.search_rounded,
+            color: kDarkGray, 
+            size: 28,
           ),
         ),
-        suffixIconConstraints: const BoxConstraints.tightFor(width: 58, height: 48),
       ),
     );
   }
@@ -591,7 +689,7 @@ class _QuickAction extends StatelessWidget {
     required this.iconAsset,
     required this.label,
     required this.color,
-    this.size = 84,
+    this.size = 80, 
     this.radius = 24,
     this.onTap,
   });
@@ -614,6 +712,7 @@ class _QuickAction extends StatelessWidget {
           Container(
             width: size,
             height: size,
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(radius),
@@ -622,13 +721,11 @@ class _QuickAction extends StatelessWidget {
             child: Center(
               child: SvgPicture.asset(
                 iconAsset,
-                width: 28,
-                height: 28,
                 colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(
             label,
             style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF32384A), height: 1.2),
@@ -737,7 +834,8 @@ class _ExploreCard extends StatelessWidget {
                 Positioned(
                   right: 10,
                   top: 10,
-                  child: FavoriteButton(parkId: item.id, size: 32),
+                  // --- CORREÇÃO: Passa o 'documentId' para o botão ---
+                  child: FavoriteButton(parkDocumentId: item.id, size: 32),
                 ),
               Positioned(
                 left: 14,
@@ -751,21 +849,7 @@ class _ExploreCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if ((item.status ?? '').isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(color: kWhite.withOpacity(.94), borderRadius: BorderRadius.circular(14)),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.circle, size: 8, color: Colors.green),
-                                  const SizedBox(width: 6),
-                                  Text(item.status!, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700)),
-                                ],
-                              ),
-                            ),
-                          const SizedBox(height: 10),
-                          Text(
+                          Text( // Título
                             item.title,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -777,17 +861,33 @@ class _ExploreCard extends StatelessWidget {
                               shadows: const [Shadow(blurRadius: 10, color: Colors.black38, offset: Offset(0, 1))],
                             ),
                           ),
+                          
+                          const SizedBox(height: 16), 
+                          if ((item.status ?? '').isNotEmpty) 
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(color: badgeColor.withOpacity(.94), borderRadius: BorderRadius.circular(14)), 
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.circle, size: 8, color: Colors.green),
+                                  const SizedBox(width: 6),
+                                  Text(item.status!, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700)),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
                     const SizedBox(width: 10),
+                    
                     InkWell(
                       onTap: onTap,
                       child: Container(
                         width: 44,
                         height: 44,
-                        decoration: const BoxDecoration(color: kBrandGreen, shape: BoxShape.circle),
-                        child: const Icon(Icons.arrow_forward_rounded, color: Colors.white),
+                        decoration: const BoxDecoration(color: kWhite, shape: BoxShape.circle), 
+                        child: const Icon(Icons.arrow_forward_rounded, color: kBrandGreen), 
                       ),
                     ),
                   ],
@@ -801,75 +901,6 @@ class _ExploreCard extends StatelessWidget {
   }
 }
 
-class _ActivityCard extends StatelessWidget {
-  const _ActivityCard({
-    required this.item,
-    required this.favoriteAccent,
-    required this.imageProviderFrom,
-    required this.width,
-    required this.height,
-    required this.radius,
-  });
-
-  final _CardItem item;
-  final Color favoriteAccent;
-  final ImageProvider Function(String) imageProviderFrom;
-  final double width;
-  final double height;
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasImage = item.image.trim().isNotEmpty;
-    return SizedBox(
-      width: width,
-      height: height,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: hasImage
-                  ? Image(image: imageProviderFrom(item.image), fit: BoxFit.cover)
-                  : Container(color: const Color(0xFFEFEFEF)),
-            ),
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 44,
-              child: Text(
-                item.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800, shadows: const [Shadow(blurRadius: 6, color: Colors.black54)]),
-              ),
-            ),
-            if ((item.status ?? '').isNotEmpty)
-              Positioned(
-                left: 12,
-                bottom: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: Colors.white.withOpacity(.94), borderRadius: BorderRadius.circular(14)),
-                  child: Text('•  ${item.status!}', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700, color: kDarkGray)),
-                ),
-              ),
-            Positioned(
-              right: 10,
-              bottom: 10,
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: const BoxDecoration(color: kBrandGreen, shape: BoxShape.circle),
-                child: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 20),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /* ====== BOTÃO LOTTIE (mantive caso use em outra parte) ====== */
 class _FavLottieButton extends StatefulWidget {
@@ -943,11 +974,12 @@ class _FavLottieButtonState extends State<_FavLottieButton>
 
 /* ================== MODELO ================== */
 class _CardItem {
-  final String id;
+  final String id;           // 'slug' ou 'id_parque' (documentId)
   final String title;
   final String image;
   final String? status;
   final bool withFavorite;
+
   const _CardItem({
     required this.id,
     required this.title,

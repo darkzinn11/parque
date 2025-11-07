@@ -16,7 +16,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Poppins offline/determinístico (não baixa em runtime)
-  GoogleFonts.config.allowRuntimeFetching = false;
+  GoogleFonts.config.allowRuntimeFetching = true;
 
   // 1) Autenticação (recupera token + usuário, se houver)
   await AuthService.instance.init();

@@ -2,65 +2,123 @@
 
 class Park {
   final int id;
+  final String documentId;
   final String name;
-  final String? status;
-  final double? rating;
+
+  // Extras usados nas telas
+  final String? status;       // <- ADICIONADO
   final String? description;
+  final double? rating;
   final String? heroImage;
   final double? latitude;
   final double? longitude;
 
-  // Removido 'slug', 'reviewsCount', etc., para corresponder ao seu Strapi
   Park({
     required this.id,
+    required this.documentId,
     required this.name,
-    this.status,
-    this.rating,
+    this.status,          // <- ADICIONADO
     this.description,
+    this.rating,
     this.heroImage,
     this.latitude,
     this.longitude,
   });
 
-  // Nova factory para "ler" a resposta do Strapi
-  factory Park.fromStrapi(Map<String, dynamic> json) {
-    const String baseUrl = 'http://192.168.15.3:1337';
-
-    // Helper para construir a URL da imagem
-    String? buildImageUrl(dynamic imageData) {
-      if (imageData is! Map || imageData['url'] == null) return null;
-      final url = imageData['url'] as String;
-      return url.startsWith('/') ? '$baseUrl$url' : url;
-    }
-
-    // Helper para extrair a descrição dos blocos de texto
-    String parseDescription(dynamic descriptionData) {
-      if (descriptionData is! List) return '';
+  /// Extrai texto de Rich Text (Blocks) ou de string simples
+  static String? _extractDescription(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is String) return raw;
+    if (raw is List) {
       final buffer = StringBuffer();
-      for (final block in descriptionData) {
-        if (block is Map && block['type'] == 'paragraph' && block['children'] is List) {
-          for (final child in block['children']) {
-            if (child is Map && child['text'] is String) {
-              buffer.write(child['text']);
-            }
-          }
+      void walk(dynamic node) {
+        if (node == null) return;
+        if (node is Map<String, dynamic>) {
+          final children = node['children'] ?? node['content'];
+          final text = node['text'];
+          if (text is String) buffer.write(text);
+          if (children is List) for (final c in children) walk(c);
+          if (node['type'] == 'paragraph') buffer.write('\n');
+        } else if (node is List) {
+          for (final c in node) walk(c);
         }
       }
-      return buffer.toString().trim();
+      for (final n in raw) walk(n);
+      final s = buffer.toString().trim();
+      return s.isEmpty ? null : s;
+    }
+    return raw.toString();
+  }
+
+  /// Tenta achar latitude/longitude num relation "park" (Map Point)
+  static (double?, double?) _extractLatLng(dynamic mapPoint) {
+    double? lat;
+    double? lng;
+
+    Map<String, dynamic>? data;
+    if (mapPoint is Map<String, dynamic>) {
+      data = mapPoint;
+      // v4: { data: { attributes: {...} } }
+      if (data['data'] is Map && data['data']['attributes'] is Map) {
+        data = data['data']['attributes'] as Map<String, dynamic>;
+      }
     }
 
-    // Extrai os dados de geolocalização da relação 'park'
-    final mapPointData = json['park'] as Map<String, dynamic>?;
+    if (data != null) {
+      double? toDouble(dynamic v) {
+        if (v == null) return null;
+        if (v is num) return v.toDouble();
+        return double.tryParse(v.toString());
+      }
+
+      lat = toDouble(
+        data['lat'] ?? data['latitude'] ?? data['y'] ?? data['Lat'] ?? data['Latitude'],
+      );
+      lng = toDouble(
+        data['lng'] ?? data['longitude'] ?? data['x'] ?? data['Lng'] ?? data['Longitude'],
+      );
+    }
+
+    return (lat, lng);
+  }
+
+  factory Park.fromStrapi(Map<String, dynamic> json) {
+    final attrs = json['attributes'] is Map<String, dynamic>
+        ? json['attributes'] as Map<String, dynamic>
+        : json;
+
+    // Imagem (media)
+    String? hero;
+    final imagem = attrs['imagem'];
+    if (imagem is Map<String, dynamic>) {
+      hero = imagem['url']?.toString(); // v5
+      hero ??= imagem['data']?['attributes']?['url']?.toString(); // v4
+    }
+
+    // Descrição (rich text ou string)
+    final desc = _extractDescription(attrs['descricao'] ?? attrs['description']);
+
+    // Nota (se houver no schema)
+    double? rating;
+    final rRaw = attrs['rating'] ?? attrs['nota'] ?? attrs['avaliacao'];
+    if (rRaw is num) rating = rRaw.toDouble();
+    if (rRaw is String) rating = double.tryParse(rRaw);
+
+    // Coordenadas do relation "park" (Map Point)
+    final (lat, lng) = _extractLatLng(attrs['park']);
 
     return Park(
-      id: json['id'],
-      name: json['nome'] ?? 'Parque sem nome',
-      description: parseDescription(json['descricao']),
-      heroImage: buildImageUrl(json['imagem']),
-      status: json['publishedAt'] != null ? 'Publicado' : 'Rascunho',
-      rating: 4.5, // Valor Fixo: seu JSON não tem 'rating'. Pode ajustar/remover.
-      latitude: mapPointData != null ? double.tryParse(mapPointData['latitude']?.toString() ?? '') : null,
-      longitude: mapPointData != null ? double.tryParse(mapPointData['longitude']?.toString() ?? '') : null,
+      id: (json['id'] ?? attrs['id']) is int
+          ? (json['id'] ?? attrs['id'])
+          : int.tryParse('${json['id'] ?? attrs['id'] ?? 0}') ?? 0,
+      documentId: (json['documentId'] ?? attrs['documentId'] ?? '').toString(),
+      name: (attrs['nome'] ?? attrs['name'] ?? '').toString(),
+      status: (attrs['status'] ?? attrs['situacao'])?.toString(),   // <- ADICIONADO
+      description: desc,
+      rating: rating,
+      heroImage: hero,
+      latitude: lat,
+      longitude: lng,
     );
   }
 }

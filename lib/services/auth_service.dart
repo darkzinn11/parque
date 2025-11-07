@@ -4,7 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 /// Endereço da API do Strapi (ajuste para seu servidor/domínio real)
-const String kApiBase = 'http://192.168.15.17:1337/api';
+const String kApiBase = 'http://192.168.15.12:1337/api';
 
 class AuthService extends ChangeNotifier {
   // ---------- SINGLETON ----------
@@ -85,7 +85,7 @@ class AuthService extends ChangeNotifier {
     if (t == null) return null;
     try {
       final res = await http.get(
-        Uri.parse('$kApiBase/users/me'),
+        Uri.parse('$kApiBase/users/me?populate=avatar'),
         headers: {'Authorization': 'Bearer $t'},
       );
 

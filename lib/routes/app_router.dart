@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../screens/onboarding_screen.dart';
 import '../screens/home_screen.dart';
-import '../screens/park_detail_screen.dart';
 import '../screens/map_screen.dart';
 
 // >>>>>> NOVOS imports do fluxo de usuário
@@ -99,12 +98,6 @@ final GoRouter appRouter = GoRouter(
                   path: 'info',
                   name: 'home_info',
                   builder: (context, state) => const _StubPage(title: 'Informações'),
-                ),
-                GoRoute(
-                  path: 'park/:id',
-                  name: 'home_park',
-                  builder: (context, state) =>
-                      ParkDetailScreen(parkId: state.pathParameters['id']!),
                 ),
               ],
             ),
