@@ -1,0 +1,9 @@
+.git
+.github
+configs/.env
+coverage
+tmp
+dist
+node_modules
+admin
+cms
