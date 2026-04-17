@@ -1,0 +1,77 @@
+name: Deploy Backend Park (Legacy Strategy)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'go-api/**'
+      - '.github/workflows/deploy-backend-park.yml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+
+    - name: Build
+      env:
+        GOOS: linux
+        GOARCH: amd64
+      run: |
+        cd go-api
+        go build -o backend-park ./cmd/api/main.go
+
+    - name: Copy files via SCP
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.BACKEND_PARK_DEPLOY_HOST }}
+        username: ${{ secrets.BACKEND_PARK_DEPLOY_USER }}
+        key: ${{ secrets.BACKEND_PARK_DEPLOY_SSH_KEY }}
+        port: ${{ secrets.BACKEND_PARK_DEPLOY_PORT }}
+        source: "go-api/backend-park"
+        target: "${{ secrets.BACKEND_PARK_DEPLOY_PATH }}"
+        strip_components: 1
+        rm: false 
+
+    - name: Setup Environment and Restart
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.BACKEND_PARK_DEPLOY_HOST }}
+        username: ${{ secrets.BACKEND_PARK_DEPLOY_USER }}
+        key: ${{ secrets.BACKEND_PARK_DEPLOY_SSH_KEY }}
+        port: ${{ secrets.BACKEND_PARK_DEPLOY_PORT }}
+        script: |
+          TARGET_DIR="${{ secrets.BACKEND_PARK_DEPLOY_PATH }}"
+          cd $TARGET_DIR
+
+          # Se o segredo BACKEND_PARK_ENV estiver configurado no GitHub, ele recria o arquivo
+          if [ ! -z "${{ secrets.BACKEND_PARK_ENV }}" ]; then
+            printf "%s" "${{ secrets.BACKEND_PARK_ENV }}" > .env
+            echo "Arquivo .env atualizado via GitHub Secrets (BACKEND_PARK_ENV)."
+          else
+            echo "Aviso: Segredo BACKEND_PARK_ENV não encontrado. Usando .env existente ou individual."
+            # Caso o usuário prefira manter os segredos individuais, 
+            # ele pode criar o .env manualmente ou podemos adicionar a lógica aqui.
+          fi
+          
+          # Garante permissão de execução no binário
+          chmod +x backend-park
+          
+          # COMANDO DE RESTART ROBUSTO
+          echo "Reiniciando servidor..."
+          pkill backend-park || true
+          
+          # Tenta liberar a porta 8080 (que estava no workflow antigo)
+          # Se usar outra porta, altere aqui ou use uma variável
+          fuser -k 8080/tcp || true
+          
+          # Inicia em background
+          nohup ./backend-park > output.log 2>&1 &
+          
+          echo "Deploy do Backend Park concluído com sucesso!"
