@@ -186,6 +186,67 @@ Usuário autor
 
 ---
 
+## Seção 4 — Upload de foto na avaliação
+
+O campo `midia_url` já existe na entidade `Review` e no painel admin. Falta expô-lo na interface do app.
+
+### 4.1 Novo endpoint de upload (Backend)
+
+```
+POST /reviews/media        (requer User auth)
+Content-Type: multipart/form-data
+Campo: "media" (arquivo de imagem)
+
+Resposta 200: { "url": "https://..." }
+```
+
+Segue o mesmo padrão do `POST /me/avatar`. Salva o arquivo no servidor e retorna a URL pública.
+
+### 4.2 Flutter — formulário de avaliação
+
+Adicionar ao bottom sheet de avaliação (após campos existentes):
+
+- Botão "Adicionar foto" com ícone de câmera
+- Ao tocar: `ImagePicker` com opções **Câmera** e **Galeria**
+- Preview da foto selecionada (thumbnail 80×80, removível com ×)
+- Upload assíncrono antes de enviar: foto sobe para `/reviews/media`, URL é incluída no body
+
+**UI do campo de foto:**
+```
+┌─────────────────────────────────────┐
+│  📷  Adicionar foto (opcional)       │  ← botão outline
+└─────────────────────────────────────┘
+
+Após seleção:
+┌──────┐
+│ foto │  ×   "playground_quebrado.jpg"
+└──────┘
+```
+
+**Estado de loading:** botão "Enviar" fica desabilitado enquanto a foto está sendo carregada. Spinner no preview.
+
+### 4.3 Flutter — exibição de foto na review
+
+Na lista de reviews do parque, se `midia_url` não for vazio:
+- Exibe thumbnail clicável abaixo do texto
+- Ao tocar: abre em fullscreen (modal simples com InteractiveViewer)
+
+### 4.4 Painel Admin — sem mudança
+
+O campo `midia_url` já aparece no modal de edição. Após o backend ter o endpoint de upload, a URL chegará automaticamente via `POST /reviews`.
+
+### 4.5 Arquivos adicionais para foto
+
+**Backend (via Antigravity):**
+- Novo handler `UploadReviewMedia` em `user_auth_handler.go` (ou review_handler.go)
+- Rota `POST /reviews/media` em `main.go`
+
+**Flutter:**
+- `lib/screens/park_detail_screen.dart` — adicionar picker no bottom sheet
+- `lib/data/repositories/go_reviews_repository.dart` — método `uploadMedia(File)`
+
+---
+
 ## Arquivos a modificar
 
 ### Backend (via Antigravity)
@@ -193,14 +254,14 @@ Usuário autor
 - `internal/domain/repositories/review_repository.go` — 2 novos métodos
 - `internal/application/usecases/review_usecase.go` — validação unicidade + ListByParkIDAndUserID
 - `internal/infrastructure/persistence/mysql_review_repository.go` — implementação
-- `internal/infrastructure/http/handlers/review_handler.go` — novo handler `/mine`, forçar Pendente no Create
-- `cmd/api/main.go` — registrar rota `/parks/:id/reviews/mine`
+- `internal/infrastructure/http/handlers/review_handler.go` — novo handler `/mine`, forçar Pendente no Create, handler `UploadReviewMedia`
+- `cmd/api/main.go` — registrar rotas `/parks/:id/reviews/mine` e `POST /reviews/media`
 
 ### Painel Admin (PAINEL-PARK)
 - `src/pages/ReviewsManagement/ReviewsManagement.tsx` — botões, modal, ordenação
 
 ### Flutter App (PARQUE)
-- `lib/data/models/review.dart` — campo status
-- `lib/data/reviews_repository.dart` — método fetchMineForPark
+- `lib/data/models/review.dart` — campo status + midiaUrl
+- `lib/data/reviews_repository.dart` — métodos fetchMineForPark e uploadMedia
 - `lib/data/repositories/go_reviews_repository.dart` — implementação
-- `lib/screens/park_detail_screen.dart` — lógica de merge, badge, botão condicional
+- `lib/screens/park_detail_screen.dart` — lógica de merge, badge, botão condicional, picker de foto, exibição de thumbnail
