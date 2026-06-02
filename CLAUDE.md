@@ -15,17 +15,35 @@
 lib/
   core/api/          — ApiClient e ApiConfig
   data/
-    models/          — Park, Review, Space, AppEvent, MapPoint
-    repositories/    — implementações Go (go_park_repository, go_reviews_repository, etc.)
+    models/          — Park, Review, Space, Reservation, Participant, AppEvent
+    repositories/    — go_park_repository, go_reviews_repository, go_reservation_repository, etc.
   screens/
-    user/            — login, cadastro, perfil, senha, preferências
-    reservations/    — catálogo de espaços, detalhe, calendário
-  services/          — auth, favorites, parks, reservations, run_tracker, google_places
+    user/            — login, cadastro, perfil, senha, preferências, user_entry_screen
+    reservations/    — park_selection, spaces_catalog, space_detail, booking_calendar,
+                       reservation_form, my_reservations
+  services/          — auth, favorites, parks, notification_service (FCM), run_tracker
   widgets/           — app_toast, favorite_button, login_required
-  routes/            — app_router (bottom bar com pill deslizante), tab_router
+  routes/            — app_router (bottom bar com pill deslizante)
 docs/
   superpowers/specs/ — specs de design aprovadas
 ```
+
+## Arquitetura de autenticação
+- `UserEntryScreen` é a raiz da aba "Usuário" — usa `Consumer<AuthService>` para alternar entre `LoginScreen` e `UserScreen` automaticamente
+- `LoginScreen` tem dois modos: (1) dentro de `UserEntryScreen` — `onLogged` callback; (2) via rota GoRouter — após login faz `context.go('/tabs/user')`
+- Guard no botão Reservas: usuário não logado é redirecionado para `/tabs/user/login`
+
+## Estado atual do sistema de reservas (implementado)
+- Fluxo: Home → seleção de parque → espaços → calendário (semana atual) → formulário → "Minhas reservas"
+- Regras: 1 reserva ativa por CPF, duração fixa 2h, aprovação pelo gestor
+- Rejeição: gestor informa motivo (obrigatório) → usuário tem 2h para editar e reenviar
+- Cancelamento: usuário pode cancelar Pendente/Aprovada antes do dia da reserva
+- Push FCM: graceful degradation (funciona sem config Firebase; ativa ao plugar credenciais)
+- `Space` é a única entidade para lugares físicos (unificou map_points + spaces)
+
+## Pendências que dependem de ação humana
+1. **Firebase**: criar projeto e adicionar `google-services.json` (Android), `GoogleService-Info.plist` (iOS), `FIREBASE_CREDENTIALS_JSON` (env backend) para ativar push notifications
+2. **PAINEL-PARK**: não está no git — arquivos salvos localmente mas sem versionamento
 
 ## Componentes globais importantes
 - `AppToast` (`lib/widgets/app_toast.dart`) — toast estilo Duolingo, usar em vez de SnackBar
@@ -36,6 +54,10 @@ docs/
 ---
 
 ## Histórico de mudanças
+
+### 2026-06-02 (fix: login não navegava após sucesso)
+- `LoginScreen` acessada via rota GoRouter ficava parada após login (onLogged era null)
+- Fix: quando `onLogged == null`, faz `context.go('/tabs/user')` → `UserEntryScreen` detecta o auth e exibe `UserScreen`
 
 ### 2026-06-02 (fix/feat: 5 melhorias críticas no sistema de reservas)
 - **Bug corrigido: reset semanal não expira mais reservas Aprovadas**
