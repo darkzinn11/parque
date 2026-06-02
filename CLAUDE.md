@@ -37,6 +37,17 @@ docs/
 
 ## Histórico de mudanças
 
+### 2026-06-02 (fix/feat: 5 melhorias críticas no sistema de reservas)
+- **Bug corrigido: reset semanal não expira mais reservas Aprovadas**
+  - Pendentes de semanas anteriores → Expirada; Aprovadas só expiram após a data da reserva
+- **Usuário pode cancelar a própria reserva** (status Pendente ou Aprovada, antes do dia)
+  - Backend: `POST /reservations/:id/cancel` → status `Cancelada`
+  - Flutter: botão "Cancelar reserva" em `MyReservationsScreen` com confirmação
+- **Conflito de slot verificado no reenvio** — se outro usuário tomou o horário durante a janela de 2h, o reenvio é bloqueado com mensagem clara
+- **Badge de pendentes na sidebar do admin** — contador âmbar atualiza a cada 30s
+- **Slots passados filtrados no calendário** — quando a data selecionada é hoje, horários já decorridos não aparecem
+- **SpaceRule não duplica mais** — upsert preserva o ID existente
+
 ### 2026-06-02 (feat: motivo de rejeição obrigatório)
 - **Gestor deve informar o motivo ao rejeitar uma reserva**
   - Backend: campo `motivo_rejeicao` na Reservation; `AdminUpdateStatus` retorna 400 se vazio
