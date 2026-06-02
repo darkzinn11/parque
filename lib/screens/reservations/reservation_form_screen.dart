@@ -383,6 +383,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
   Widget _buildRejectedBanner() {
     final left = _timeLeft;
+    final motivo = widget.reservation?.motivoRejeicao ?? '';
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(14),
@@ -392,8 +393,12 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
         border: Border.all(color: const Color(0xFFE53935).withValues(alpha: 0.4)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.error_outline, color: Color(0xFFE53935)),
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(Icons.error_outline, color: Color(0xFFE53935), size: 20),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -403,6 +408,14 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
                   'Reserva recusada — edite e reenvie',
                   style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: _dark),
                 ),
+                if (motivo.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Motivo: $motivo',
+                    style: GoogleFonts.poppins(fontSize: 12, color: _dark, height: 1.4),
+                  ),
+                ],
+                const SizedBox(height: 4),
                 if (left != null)
                   Text(
                     'Tempo restante: ${_fmtCountdown(left)}',

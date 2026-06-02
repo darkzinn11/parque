@@ -37,6 +37,25 @@ docs/
 
 ## Histórico de mudanças
 
+### 2026-06-02 (refactor: unificação MapPoint + Space)
+- **`Space` agora é a única fonte de verdade para lugares físicos** (refactor de arquitetura)
+  - Campo `exibir_no_mapa bool` + `lat/lng` + `categoria_mapa` adicionados ao Space
+  - O endpoint `/map-points` virou adaptador sobre Space (Flutter não mudou nada)
+  - `MapPointUseCase` reescrito — gerencia Spaces com flag de mapa, sem bridge hack
+  - Migration automática no boot: copia `map_points` → `spaces` (idempotente)
+  - Admin: formulário de ponto ganhou toggles separados "Exibir no mapa" e "Permite reserva"
+  - Campos `pode_reservar`/`space_id` removidos do MapPoint legacy
+  - Backend: `go build` ✅ · Admin: `tsc --noEmit` ✅
+
+### 2026-06-02 (fix: pontos de interesse → reservas)
+- **MapPoint conectado ao sistema de reservas**
+  - Backend: adicionado `pode_reservar bool` e `space_id *uint` ao MapPoint
+  - Quando `pode_reservar=true`, o backend auto-cria/sincroniza um `Space` + `SpaceRule` vinculado
+  - Espaço criado passa a aparecer no catálogo de reservas do app automaticamente
+  - Admin: formulário de ponto de interesse virou **página inteira** (rota `/pontos-de-interesse/novo` e `/:id/editar`)
+  - Formulário tem toggle "Permite reserva" que revela campos de capacidade, horários e dias de funcionamento
+  - Tabela de pontos ganhou coluna "Reserva" mostrando se o ponto aceita agendamento
+
 ### 2026-06-02 (implementação)
 - **Sistema de Agendamento implementado** nos 3 projetos (branch `feat/reservations-redesign`)
   - **Backend Go** (`PARQUE-BACK`): entidade Reservation expandida (CPF, participantes JSON,

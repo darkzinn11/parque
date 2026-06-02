@@ -229,6 +229,31 @@ class _ReservationCardState extends State<_ReservationCard> {
               ],
             ),
 
+            // Motivo de rejeição
+            if (r.status == 'Rejeitada' && r.motivoRejeicao.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF0F0),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.info_outline, size: 14, color: Color(0xFFE53935)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Motivo: ${r.motivoRejeicao}',
+                        style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF32384A), height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             // Contagem regressiva + botão de reenvio
             if (r.canResubmit && left != null) ...[
               const SizedBox(height: 12),

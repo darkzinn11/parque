@@ -27,6 +27,7 @@ class Reservation {
   final String horaFim; // HH:MM
   final String status; // Pendente | Aprovada | Rejeitada | Expirada
   final DateTime? rejectedAt;
+  final String motivoRejeicao;
   final List<Participant> participants;
 
   const Reservation({
@@ -40,6 +41,7 @@ class Reservation {
     required this.horaFim,
     required this.status,
     required this.rejectedAt,
+    required this.motivoRejeicao,
     required this.participants,
   });
 
@@ -70,6 +72,7 @@ class Reservation {
       horaFim: (json['hora_fim'] ?? '').toString(),
       status: (json['status'] ?? 'Pendente').toString(),
       rejectedAt: rejected,
+      motivoRejeicao: (json['motivo_rejeicao'] ?? '').toString(),
       participants: rawParticipants
           .whereType<Map<String, dynamic>>()
           .map(Participant.fromJson)
