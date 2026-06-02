@@ -45,6 +45,14 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
     setState(() => _isLoading = true);
     final list = await _repo.fetchMine();
     if (mounted) {
+      // Ativas primeiro, depois por data
+      list.sort((a, b) {
+        const order = ['Pendente', 'Aprovada', 'Rejeitada', 'Expirada', 'Cancelada'];
+        final ia = order.indexOf(a.status);
+        final ib = order.indexOf(b.status);
+        if (ia != ib) return ia.compareTo(ib);
+        return b.data.compareTo(a.data);
+      });
       setState(() {
         _reservations = list;
         _isLoading = false;
@@ -84,6 +92,7 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
                       itemBuilder: (context, index) => _ReservationCard(
                         reservation: _reservations[index],
                         onResubmit: () => _goEdit(_reservations[index]),
+                        onCancel: () => _cancelReservation(_reservations[index]),
                       ),
                     ),
             ),
@@ -93,6 +102,45 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
   Future<void> _goEdit(Reservation r) async {
     await context.push('/tabs/user/minhas-reservas/${r.id}/editar', extra: r);
     if (mounted) _load();
+  }
+
+  Future<void> _cancelReservation(Reservation r) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Cancelar reserva', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 17)),
+        content: Text(
+          'Tem certeza que deseja cancelar sua reserva em ${r.spaceName}?',
+          style: GoogleFonts.poppins(fontSize: 13, color: _dark, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Não', style: GoogleFonts.poppins(color: _lightGray)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red.shade600,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Text('Sim, cancelar', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final result = await _repo.cancel(r.id);
+    if (mounted) {
+      if (result.success) {
+        _load();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.error ?? 'Erro ao cancelar.'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Widget _buildEmpty() {
@@ -136,6 +184,8 @@ class _StatusBadge {
           return const _StatusBadge('Recusada', Color(0xFFFFF0F0), Color(0xFFE53935));
         }
         return const _StatusBadge('Expirada', Color(0xFFF0F0F0), _lightGray);
+      case 'Cancelada':
+        return const _StatusBadge('Cancelada', Color(0xFFF0F0F0), _lightGray);
       default:
         return const _StatusBadge('Expirada', Color(0xFFF0F0F0), _lightGray);
     }
@@ -143,9 +193,10 @@ class _StatusBadge {
 }
 
 class _ReservationCard extends StatefulWidget {
-  const _ReservationCard({required this.reservation, required this.onResubmit});
+  const _ReservationCard({required this.reservation, required this.onResubmit, required this.onCancel});
   final Reservation reservation;
   final VoidCallback onResubmit;
+  final VoidCallback onCancel;
 
   @override
   State<_ReservationCard> createState() => _ReservationCardState();
@@ -273,6 +324,26 @@ class _ReservationCardState extends State<_ReservationCard> {
                   ),
                   child: Text('Editar e reenviar',
                       style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+
+            // Botão cancelar (Pendente ou Aprovada)
+            if (r.status == 'Pendente' || r.status == 'Aprovada') ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: widget.onCancel,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade600,
+                    side: BorderSide(color: Colors.red.shade300),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: Text(
+                    'Cancelar reserva',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.red.shade600),
+                  ),
                 ),
               ),
             ],

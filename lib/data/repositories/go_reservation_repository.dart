@@ -91,6 +91,17 @@ class GoReservationRepository {
     }
   }
 
+  /// Cancela uma reserva do próprio usuário.
+  Future<ReservationResult> cancel(int id) async {
+    try {
+      final res = await _api.post('reservations/$id/cancel');
+      if (res.statusCode == 200) return ReservationResult(success: true, id: id);
+      return ReservationResult(success: false, statusCode: res.statusCode, error: _extractError(res.body));
+    } catch (_) {
+      return const ReservationResult(success: false, error: 'Erro de conexão.');
+    }
+  }
+
   String? _extractError(String body) {
     try {
       final data = jsonDecode(body) as Map<String, dynamic>;

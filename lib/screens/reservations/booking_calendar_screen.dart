@@ -71,8 +71,24 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
       _selectedSlotIndex = -1;
     });
 
-    final dateStr = DateFormat('yyyy-MM-dd').format(_dates[_selectedDateIndex]);
-    final slots = await _repository.fetchAvailability(widget.spaceId, dateStr);
+    final date = _dates[_selectedDateIndex];
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    var slots = await _repository.fetchAvailability(widget.spaceId, dateStr);
+
+    // Se for hoje, remove slots cujo horário de início já passou.
+    final now = DateTime.now();
+    final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
+    if (isToday) {
+      final nowMinutes = now.hour * 60 + now.minute;
+      slots = slots.where((slot) {
+        final parts = slot.split(' - ');
+        if (parts.isEmpty) return false;
+        final timeParts = parts[0].split(':');
+        if (timeParts.length < 2) return false;
+        final slotMinutes = int.parse(timeParts[0]) * 60 + int.parse(timeParts[1]);
+        return slotMinutes > nowMinutes;
+      }).toList();
+    }
 
     if (mounted) {
       setState(() {
