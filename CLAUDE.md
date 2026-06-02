@@ -37,6 +37,14 @@ docs/
 
 ## Histórico de mudanças
 
+### 2026-06-02 (feat: motivo de rejeição obrigatório)
+- **Gestor deve informar o motivo ao rejeitar uma reserva**
+  - Backend: campo `motivo_rejeicao` na Reservation; `AdminUpdateStatus` retorna 400 se vazio
+  - Admin: clicar "Rejeitar" abre modal com textarea — "Confirmar" só habilita com texto preenchido
+  - Push FCM: motivo incluído na mensagem de notificação
+  - Flutter: motivo exibido no banner de edição (`ReservationFormScreen`) e no card rejeitado (`MyReservationsScreen`)
+  - Motivo limpo automaticamente quando usuário reenvia a reserva
+
 ### 2026-06-02 (refactor: unificação MapPoint + Space)
 - **`Space` agora é a única fonte de verdade para lugares físicos** (refactor de arquitetura)
   - Campo `exibir_no_mapa bool` + `lat/lng` + `categoria_mapa` adicionados ao Space
