@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/auth_service.dart';
 import '../../services/favorites_service.dart';
+import '../../widgets/app_toast.dart';
 
 /// ===== TOKENS =====
 const kGreen = Color(0xFF669340);
@@ -117,10 +118,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (ok) {
       await FavoritesService.instance.init();
-      widget.onLogged?.call();
+      if (!mounted) return;
+
+      if (widget.onLogged != null) {
+        widget.onLogged!();
+      } else {
+        // Acessado via rota GoRouter (ex: vindo do botão Reservas).
+        // Volta para a aba de usuário — UserEntryScreen detecta o login e exibe UserScreen.
+        context.go('/tabs/user');
+      }
+
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Login realizado')));
+        AppToast.show(context, 'Login realizado', type: ToastType.success);
       }
     } else {
       setState(() => _error = 'E-mail ou senha inválidos.');
@@ -134,12 +143,11 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     final sent = await _auth.requestPasswordReset(_email.text.trim());
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(
-        sent ? 'Enviamos instruções para seu e-mail.'
-             : 'Não foi possível enviar o e-mail.',
-      ),
-    ));
+    AppToast.show(
+      context,
+      sent ? 'Enviamos instruções para seu e-mail.' : 'Não foi possível enviar o e-mail.',
+      type: sent ? ToastType.success : ToastType.error,
+    );
     widget.onForgotDone?.call();
   }
 
