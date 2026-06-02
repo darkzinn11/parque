@@ -1,11 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'routes/app_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import 'routes/app_router.dart';
 
 // Serviços
 import 'services/auth_service.dart';
 import 'services/favorites_service.dart';
+import 'services/notification_service.dart';
+
+// Repositórios e Core
+import 'data/park_repository.dart';
+import 'data/reviews_repository.dart';
+import 'data/repositories/go_park_repository.dart';
+import 'data/repositories/go_reviews_repository.dart';
+import 'data/repositories/event_repository.dart';
+import 'data/repositories/map_point_repository.dart';
 
 /// ===== CORES/TOKENS =====
 const kGreen = Color(0xFF669340);
@@ -15,14 +27,17 @@ const kBg    = Color(0xFFF6F7F9);
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Poppins offline/determinístico (não baixa em runtime)
   GoogleFonts.config.allowRuntimeFetching = true;
 
-  // 1) Autenticação (recupera token + usuário, se houver)
   await AuthService.instance.init();
-
-  // 2) Favoritos (carrega do usuário logado, se houver)
   await FavoritesService.instance.init();
+
+  // Push notifications (graceful: não quebra se o Firebase ainda não estiver configurado).
+  NotificationService.instance.onDeepLink = (route) {
+    appRouter.go(route);
+  };
+  // Não aguardamos: a inicialização é best-effort e não deve travar o boot.
+  unawaited(NotificationService.instance.initialize());
 
   runApp(const ParquesApp());
 }
@@ -36,12 +51,28 @@ class ParquesApp extends StatelessWidget {
 
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider.value(value: AuthService.instance),
         ChangeNotifierProvider.value(value: FavoritesService.instance),
+        Provider<ParkRepository>(
+          create: (_) => GoParkRepository(),
+        ),
+        Provider<ReviewsRepository>(
+          create: (_) => GoReviewsRepository(),
+        ),
+        Provider<EventRepository>(
+          create: (_) => GoEventRepository(),
+        ),
+        Provider<MapPointRepository>(
+          create: (_) => GoMapPointRepository(),
+        ),
       ],
       child: MaterialApp.router(
         title: 'Parques SLZ',
         debugShowCheckedModeBanner: false,
+
+        // ✅ Usa o GoRouter central
         routerConfig: appRouter,
+
         theme: ThemeData(
           useMaterial3: true,
           scaffoldBackgroundColor: kBg,
@@ -50,15 +81,31 @@ class ParquesApp extends StatelessWidget {
             brightness: Brightness.light,
           ),
 
-          // Fonte global = Poppins
           fontFamily: GoogleFonts.poppins().fontFamily,
 
-          // Tipografia base (Body 16/24; títulos conforme Figma)
           textTheme: baseText.copyWith(
-            bodyLarge:  baseText.bodyLarge?.copyWith(fontSize: 16, height: 1.5, fontWeight: FontWeight.w400, color: kDark),
-            bodyMedium: baseText.bodyMedium?.copyWith(fontSize: 16, height: 1.5, fontWeight: FontWeight.w400, color: kDark),
-            bodySmall:  baseText.bodySmall?.copyWith(fontSize: 14, height: 1.4, color: kDark),
-            titleMedium: baseText.titleMedium?.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: kGreen),
+            bodyLarge: baseText.bodyLarge?.copyWith(
+              fontSize: 16,
+              height: 1.5,
+              fontWeight: FontWeight.w400,
+              color: kDark,
+            ),
+            bodyMedium: baseText.bodyMedium?.copyWith(
+              fontSize: 16,
+              height: 1.5,
+              fontWeight: FontWeight.w400,
+              color: kDark,
+            ),
+            bodySmall: baseText.bodySmall?.copyWith(
+              fontSize: 14,
+              height: 1.4,
+              color: kDark,
+            ),
+            titleMedium: baseText.titleMedium?.copyWith(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: kGreen,
+            ),
           ),
 
           appBarTheme: const AppBarTheme(
@@ -92,7 +139,10 @@ class ParquesApp extends StatelessWidget {
           snackBarTheme: const SnackBarThemeData(
             behavior: SnackBarBehavior.floating,
             backgroundColor: Colors.black87,
-            contentTextStyle: TextStyle(color: Colors.white, fontSize: 14),
+            contentTextStyle: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+            ),
           ),
         ),
       ),

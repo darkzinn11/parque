@@ -1,56 +1,35 @@
-// lib/screens/home_screen.dart
-import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
-import 'package:lottie/lottie.dart';
-import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shimmer/shimmer.dart';
 
 import '../routes/app_router.dart';
-
-// +++ FAVORITOS +++
 import '../services/auth_service.dart';
-import '../services/favorites_service.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/favorite_button.dart';
-// --- FAVORITOS ---
+
+import '../data/park_repository.dart';
+import '../data/repositories/map_point_repository.dart';
+import '../data/models/park.dart';
+import '../core/api/api_config.dart';
 
 const kBrandGreen = Color(0xFF669340);
-const kDarkGray   = Color(0xFF32384A);
-const kWhite      = Color(0xFFFFFFFF);
+const kDarkGray = Color(0xFF32384A);
+const kWhite = Color(0xFFFFFFFF);
 
-// --- CORES DO FIGMA ---
 const kFigmaSearchHint = Color(0xFFBCC1A6);
-const kFigmaSearchFill = Color(0xFFFFFFE9); 
-const kFigmaBellBg     = Color(0xFFF5F7EB);
-// --- FIM NOVAS CORES ---
-
-const String kStrapiBaseUrl = 'http://192.168.15.12:1337';
-
-const String kParksCollection = 'parks';
-const String kActivitiesCollection = 'activities';
-
-const String? kStrapiStaticToken = null;
-
-const _CollectionFields kParksFields = _CollectionFields(
-  title: ['title', 'name', 'nome'],
-  image: ['image', 'hero_image', 'capa', 'banner', 'foto', 'imagem'],
-  status: ['status', 'situacao'],
-  slug: ['slug', 'id_parque', 'id'], // 'slug' ou 'id_parque' é o documentId
-);
-const _CollectionFields kActivitiesFields = _CollectionFields(
-  title: ['titulo', 'name', 'title', 'nome'],
-  image: ['hero_image', 'image', 'capa', 'banner', 'foto', 'imagem'],
-  status: ['status', 'situacao'],
-  slug: ['slug', 'id_atividade', 'id'], // 'slug' ou 'id_atividade' é o documentId
-);
+const kFigmaSearchFill = Color(0xFFFFFFE9);
+const kFigmaBellBg = Color(0xFFF5F7EB);
 
 /* ================== HOME SCREEN ================== */
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({
-    super.key,
-  });
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -63,21 +42,22 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
 
   List<_CardItem> explorar = []; // parques
-  List<_CardItem> divertir = []; // atividades
+  List<_CardItem> divertir = []; // atividades/eventos
+  List<_CardItem> caminhar = []; // vem caminhar (se disponível no Go)
 
   String _query = '';
+
+  List<Park> _allParks = [];
+  Position? _currentPosition;
+  Park? _closestPark;
+  double? _closestDistanceKm;
 
   @override
   void initState() {
     super.initState();
-    _setupFavs();
     _loadAll();
   }
 
-  Future<void> _setupFavs() async {
-    // Carrega os favoritos salvos no app
-    await FavoritesService.instance.init(); 
-  }
 
   Future<void> _loadAll() async {
     if (!mounted) return;
@@ -87,151 +67,88 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final parks = await _fetchCollection(
-        collection: kParksCollection,
-        fields: kParksFields,
-        limit: 12,
-        sort: ['nome'],
-        isPark: true,
-      );
+      final parkRepo = context.read<ParkRepository>();
+      final mapRepo = context.read<MapPointRepository>();
 
-      final activities = await _fetchCollection(
-        collection: kActivitiesCollection,
-        fields: kActivitiesFields,
-        limit: 12,
-        sort: ['titulo'],
-        isPark: false,
-      );
+      // parques
+      final parksRaw = await parkRepo.fetchAll();
+      final parks = parksRaw.map((p) => _CardItem(
+        id: p.documentId,
+        title: p.name,
+        image: _toImageUrl(p.heroImage) ?? '',
+        status: p.status,
+        withFavorite: true,
+      )).toList();
+
+      // pontos de interesse (divertir e caminhar)
+      final pointsRaw = await mapRepo.fetchAll();
+      
+      final activities = pointsRaw
+        .where((p) => p.categoria == 'divertir')
+        .map((p) => _CardItem(
+          id: p.parkId.toString(), // Joga para a tela do parque
+          title: p.nome,
+          image: _toImageUrl(p.imagemUrl) ?? '',
+          status: null,
+          withFavorite: false,
+        )).toList();
+
+      final walks = pointsRaw
+        .where((p) => p.categoria == 'caminhar')
+        .map((p) => _CardItem(
+          id: p.parkId.toString(), // Joga para a tela do parque
+          title: p.nome,
+          image: _toImageUrl(p.imagemUrl) ?? '',
+          status: null,
+          withFavorite: false,
+        )).toList();
+
+      _allParks = parksRaw;
+      if (parksRaw.isNotEmpty) {
+        _closestPark = parksRaw.first;
+      }
 
       if (!mounted) return;
       setState(() {
         explorar = parks;
         divertir = activities;
+        caminhar = walks; 
         _isLoading = false;
       });
+
+      _determinePosition();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = 'Erro ao carregar dados: $e';
         _isLoading = false;
       });
     }
   }
 
-  Future<List<_CardItem>> _fetchCollection({
-    required String collection,
-    required _CollectionFields fields,
-    int limit = 10,
-    List<String> sort = const [],
-    bool isPark = false,
-  }) async {
-    final qp = <String, String>{
-      'limit': '$limit',
-      'populate': '*',
-    };
-    if (sort.isNotEmpty) qp['sort'] = sort.join(',');
-
-    final uri = Uri.parse('$kStrapiBaseUrl/api/$collection').replace(
-      queryParameters: qp,
-    );
-
-    final headers = <String, String>{
-      'Accept': 'application/json',
-      if (kStrapiStaticToken != null) 'Authorization': 'Bearer $kStrapiStaticToken',
-    };
-
-    final res = await http.get(uri, headers: headers);
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception('Erro ${res.statusCode} ao buscar "$collection". Body: ${res.body}');
-    }
-    
-    final body = json.decode(res.body);
-    final List data = (body['data'] is List) ? body['data'] as List : [];
-
-    final items = <_CardItem>[];
-    for (final raw in data) {
-      if (raw is! Map) continue;
-
-      final map = raw.cast<String, dynamic>();
-      // v5: { id: 1, documentId: 'xxx', nome: '...', ... }
-      final attributes = (map['attributes'] is Map) ? Map<String, dynamic>.from(map['attributes']) : map;
-
-      final idNum = (map['id'] is int) ? map['id'] : int.tryParse('${map['id']}');
-      
-      // Usa o 'documentId' (slug) ou 'id' como o ID de navegação/favorito
-      final docId = (map['documentId'] ?? attributes['documentId'] ?? _firstNonEmpty(attributes, fields.slug))?.toString();
-      
-      // Garante que temos um ID (seja o docId ou o numérico)
-      final primaryId = (docId != null && docId.isNotEmpty) ? docId : idNum.toString();
-
-      final title = _firstNonEmpty(attributes, fields.title) ?? 'Sem título';
-      final status = _firstNonEmpty(attributes, fields.status);
-
-      final imageVal = _resolveImageValue(attributes, fields.image);
-      final imageUrl = _toImageUrl(imageVal);
-
-      items.add(_CardItem(
-        id: primaryId, // ID principal (usado para navegação E favoritos)
-        title: title,
-        image: imageUrl ?? '',
-        status: status,
-        withFavorite: isPark,
-      ));
-    }
-
-    return items;
-  }
-
-  /// Tenta resolver campo de imagem em formatos comuns (url direta, media v4/v5, arrays)
-  static dynamic _resolveImageValue(Map<String, dynamic> map, List<String> candidates) {
-    for (final key in candidates) {
-      if (!map.containsKey(key) || map[key] == null) continue;
-      final val = map[key];
-
-      if (val is String) return val;
-      if (val is Map && val['url'] != null) return val['url'];
-
-      if (val is Map && val['data'] != null) {
-        final data = val['data'];
-        if (data is Map) {
-          final attrs = data['attributes'];
-          if (attrs is Map && attrs['url'] != null) return attrs['url'];
-        }
-        if (data is List && data.isNotEmpty) {
-          final first = data.first;
-          if (first is Map) {
-            final attrs = first['attributes'];
-            if (attrs is Map && attrs['url'] != null) return attrs['url'];
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  static String? _toImageUrl(dynamic value) {
+  String? _toImageUrl(dynamic value) {
     if (value == null) return null;
     final v = value.toString().trim();
     if (v.isEmpty) return null;
-    if (v.startsWith('http://') || v.startsWith('https://')) return v;
-    if (v.startsWith('/')) return '$kStrapiBaseUrl$v';
-    // Ajustado para o caminho de upload padrão do Strapi
-    return '$kStrapiBaseUrl$v'; 
-  }
-
-  static String? _firstNonEmpty(Map<String, dynamic> map, List<String> candidates) {
-    for (final key in candidates) {
-      final v = map[key];
-      if (v == null) continue;
-      final s = v.toString().trim();
-      if (s.isNotEmpty) return s;
+    
+    // Se já é uma URL completa
+    if (v.startsWith('http://') || v.startsWith('https://')) {
+      // FIX TEMPORÁRIO: Se a URL for do apps.sitw.com.br mas não tiver /backend-park
+      if (v.contains('apps.sitw.com.br') && !v.contains('/backend-park/')) {
+        return v.replaceFirst('apps.sitw.com.br/', 'apps.sitw.com.br/backend-park/');
+      }
+      return v;
     }
-    return null;
+    
+    // Se for um caminho relativo, usamos a base do backend-park
+    final baseUrl = ApiConfig.baseUrl.replaceAll('/api/v1', '');
+    final cleanPath = v.startsWith('/') ? v.substring(1) : v;
+    return '$baseUrl/$cleanPath';
   }
 
   ImageProvider _imageProviderFrom(String src) {
     if (src.startsWith('http://') || src.startsWith('https://')) {
-      return NetworkImage(src);
+      return CachedNetworkImageProvider(src);
     }
     return const AssetImage('assets/placeholder.png');
   }
@@ -249,6 +166,21 @@ class _HomeScreenState extends State<HomeScreen> {
     return items.where((e) => e.title.toLowerCase().contains(q)).toList();
   }
 
+  /// Somente usuários logados podem reservar. Caso contrário, leva ao login.
+  void _openReservas(BuildContext context) {
+    final logged = context.read<AuthService>().currentUser != null;
+    if (logged) {
+      context.push(AppRoutes.homeReservas);
+    } else {
+      AppToast.show(
+        context,
+        'Faça login para reservar um espaço.',
+        type: ToastType.warning,
+      );
+      context.go('/tabs/user/login');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     const headerTitleSize = 20.0;
@@ -259,273 +191,401 @@ class _HomeScreenState extends State<HomeScreen> {
     const double exploreCardHeight = 300.0;
     const double exploreCardRadius = 8.0;
 
-    const double smallCardWidth = 282.0;
-    const double smallCardHeight = 300.0;
-    const double smallCardRadius = 8.0;
-    
-    const quickSize = 80.0;
-    const quickRadius = 24.0;
+    final me = context.watch<AuthService>().currentUser;
+    String displayName = _saudacaoDia();
+    if (me != null) {
+      final nome = me['name'] ?? me['username'] ?? me['first_name'];
+      if (nome != null && nome.toString().isNotEmpty) {
+        displayName = nome.toString().split(' ').first;
+      }
+    }
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: _isLoading
-            ? const _LoadingHome()
-            : _error != null
-                ? _ErrorHome(message: _error!, onRetry: _loadAll)
-                : CustomScrollView(
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+        child: _error != null
+            ? _ErrorHome(message: _error!, onRetry: _loadAll)
+            : CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // HEADER
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
-                                  // HEADER
-                                  Row(
-                                    crossAxisAlignment: CrossAxisAlignment.center, 
-                                    children: [
-                                      const _Avatar(), 
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            RichText(
-                                              text: TextSpan(
-                                                children: [
-                                                  TextSpan(
-                                                    text: 'Oi, ', 
-                                                    style: GoogleFonts.poppins(
-                                                      fontSize: headerTitleSize,
-                                                      fontWeight: FontWeight.w400,
-                                                      color: Colors.black,
-                                                      height: headerTitleLineHeight,
-                                                    ),
-                                                  ),
-                                                  WidgetSpan(
-                                                    alignment: PlaceholderAlignment.baseline,
-                                                    baseline: TextBaseline.alphabetic,
-                                                    child: FutureBuilder<Map<String, dynamic>?>(
-                                                      future: AuthService.instance.me(),
-                                                      builder: (context, snapshot) {
-                                                        String displayName = _saudacaoDia();
-                                                        if (snapshot.hasData && snapshot.data != null) {
-                                                          final me = snapshot.data!;
-                                                          final nome = me['name'] ?? me['username'] ?? me['first_name'];
-                                                          if (nome != null && nome.toString().isNotEmpty) {
-                                                            displayName = nome.toString().split(' ').first;
-                                                          }
-                                                        }
-                                                        return Text(
-                                                          displayName,
-                                                          style: GoogleFonts.poppins(
-                                                            fontSize: headerTitleSize,
-                                                            fontWeight: FontWeight.w700,
-                                                            color: kBrandGreen,
-                                                            height: headerTitleLineHeight,
-                                                          ),
-                                                        );
-                                                      },
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
+                                  if (me != null) ...[
+                                    const _Avatar(),
+                                    const SizedBox(width: 12),
+                                  ],
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        AnimatedSwitcher(
+                                          duration: const Duration(milliseconds: 400),
+                                          transitionBuilder: (child, anim) =>
+                                              FadeTransition(
+                                            opacity: anim,
+                                            child: SlideTransition(
+                                              position: Tween<Offset>(
+                                                begin: const Offset(0, 0.25),
+                                                end: Offset.zero,
+                                              ).animate(CurvedAnimation(
+                                                parent: anim,
+                                                curve: Curves.easeOut,
+                                              )),
+                                              child: child,
                                             ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              'Para onde vamos hoje?',
-                                              style: GoogleFonts.poppins(
-                                                fontSize: headerSubtitleSize,
-                                                color: kDarkGray.withOpacity(.7),
-                                                height: 1.25,
-                                              ),
+                                          ),
+                                          child: Text.rich(
+                                            key: ValueKey(displayName),
+                                            TextSpan(
+                                              children: [
+                                                TextSpan(
+                                                  text: 'Oi, ',
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: headerTitleSize,
+                                                    fontWeight: FontWeight.w400,
+                                                    color: Colors.black,
+                                                    height: headerTitleLineHeight,
+                                                  ),
+                                                ),
+                                                TextSpan(
+                                                  text: displayName,
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: headerTitleSize,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: kBrandGreen,
+                                                    height: headerTitleLineHeight,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                          ],
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      const _NotificationBell(), 
-                                    ],
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Para onde vamos hoje?',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: headerSubtitleSize,
+                                            color:
+                                                kDarkGray.withValues(alpha: .7),
+                                            height: 1.25,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  const SizedBox(height: 40), 
-
-                                  // BUSCA
-                                  _SearchBar(
-                                    controller: _search,
-                                    hint: 'O que você está procurando?',
-                                    borderColor: kBrandGreen, 
-                                    onSubmitted: (text) => setState(() => _query = text.trim()),
-                                  ),
-                                  const SizedBox(height: 16), 
-
-                                  // ATALHOS
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center, 
-                                    children: [
-                                      _QuickAction(
-                                        iconAsset: 'assets/icons/Map.svg',
-                                        label: 'Mapa',
-                                        color: kBrandGreen,
-                                        size: quickSize,
-                                        radius: quickRadius,
-                                        onTap: () => context.go(AppRoutes.map),
-                                      ),
-                                      const SizedBox(width: 20), 
-                                      _QuickAction(
-                                        iconAsset: 'assets/icons/Calendar_Check.svg',
-                                        label: 'Reservas',
-                                        color: kBrandGreen,
-                                        size: quickSize,
-                                        radius: quickRadius,
-                                        onTap: () => context.push(AppRoutes.homeReservas),
-                                      ),
-                                      const SizedBox(width: 20), 
-                                      _QuickAction(
-                                        iconAsset: 'assets/icons/calendar.svg',
-                                        label: 'Eventos',
-                                        color: kBrandGreen,
-                                        size: quickSize,
-                                        radius: quickRadius,
-                                        onTap: () => context.push(AppRoutes.homeEventos),
-                                      ),
-                                      const SizedBox(width: 20), 
-                                      _QuickAction(
-                                        iconAsset: 'assets/icons/info.svg',
-                                        label: 'Info',
-                                        color: kBrandGreen,
-                                        size: quickSize,
-                                        radius: quickRadius,
-                                        onTap: () => context.push(AppRoutes.homeInfo),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 40), 
-
-                                  // TÍTULO VEM EXPLORAR
-                                  _SectionTitle(
-                                    title: 'Vem explorar',
-                                    subtitle: 'Encontre o parque perfeito para sua próxima aventura!',
-                                    color: kBrandGreen,
-                                    subtitleColor: kDarkGray.withOpacity(.7),
-                                  ),
-                                  const SizedBox(height: 16),
+                                  const SizedBox(width: 12),
+                                  const _NotificationBell(),
                                 ],
                               ),
-                            ),
-                            
-                            // LISTA VEM EXPLORAR
-                            SizedBox(
-                              height: exploreCardHeight, 
-                              child: _applyFilter(explorar).isEmpty
-                                  ? const _EmptyLane()
-                                  : ListView.separated(
-                                      scrollDirection: Axis.horizontal,
-                                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                                      itemBuilder: (context, i) {
-                                        final item = _applyFilter(explorar)[i];
-                                        return _ExploreCard( 
-                                          item: item,
-                                          color: kBrandGreen,
-                                          badgeColor: kWhite,
-                                          width: exploreCardWidth, 
-                                          height: exploreCardHeight, 
-                                          radius: exploreCardRadius, 
-                                          imageProviderFrom: _imageProviderFrom,
-                                          onTap: () => context.push(AppRoutes.homePark(item.id)),
-                                        );
-                                      },
-                                      separatorBuilder: (_, __) => const SizedBox(width: 16),
-                                      itemCount: _applyFilter(explorar).length,
-                                    ),
-                            ),
+                              const SizedBox(height: 40),
 
-                            // TÍTULO VEM SE DIVERTIR
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20),
-                              child: Column(
+                              // BUSCA
+                              _SearchBar(
+                                controller: _search,
+                                hint: 'O que você está procurando?',
+                                borderColor: kBrandGreen,
+                                onSubmitted: (text) =>
+                                    setState(() => _query = text.trim()),
+                              ),
+                              const SizedBox(height: 16),
+
+                              // ATALHOS
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const SizedBox(height: 28),
-                                  const _SectionHeader(label: 'Vem se divertir', color: kBrandGreen),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Diversão para todas as idades, do nascer ao pôr do sol.',
-                                    style: GoogleFonts.poppins(fontSize: 14, color: kDarkGray.withOpacity(.7), height: 1.3),
+                                  _QuickAction(
+                                    iconData: Icons.favorite_border,
+                                    label: 'Favoritos',
+                                    color: kBrandGreen,
+                                    onTap: () => context
+                                        .push(AppRoutes.homeFavorites),
                                   ),
-                                  const SizedBox(height: 16),
+                                  _QuickAction(
+                                    iconAsset:
+                                        'assets/icons/Calendar_Check.svg',
+                                    label: 'Reservas',
+                                    color: kBrandGreen,
+                                    onTap: () => _openReservas(context),
+                                  ),
+                                  _QuickAction(
+                                    iconAsset: 'assets/icons/calendar.svg',
+                                    label: 'Eventos',
+                                    color: kBrandGreen,
+                                    onTap: () =>
+                                        context.push(AppRoutes.homeEventos),
+                                  ),
+                                  _QuickAction(
+                                    iconAsset: 'assets/icons/info.svg',
+                                    label: 'Info',
+                                    color: kBrandGreen,
+                                    onTap: () =>
+                                        context.push(AppRoutes.homeInfo),
+                                  ),
+                                  _QuickAction(
+                                    iconData: Icons.campaign_outlined,
+                                    label: 'Denuncie',
+                                    color: kBrandGreen,
+                                    onTap: () =>
+                                        context.push(AppRoutes.homeDenuncie),
+                                  ),
                                 ],
                               ),
-                            ),
-                            
-                            // LISTA VEM SE DIVERTIR
-                            SizedBox(
-                              height: smallCardHeight, 
-                              child: _applyFilter(divertir).isEmpty
+
+                              const SizedBox(height: 24),
+
+                              // IMAGEM DE DESTAQUE
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                child: Image.asset(
+                                  'assets/images/destaque.png',
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+
+                              const SizedBox(height: 32),
+
+                              // PERTO DE VOCÊ
+                              if (!_isLoading && _closestPark != null) ...[
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const _SectionHeader(
+                                      label: 'Perto de você',
+                                      color: kBrandGreen,
+                                    ),
+                                    GestureDetector(
+                                      onTap: () => context.push(AppRoutes.map),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            'Ver todos',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                              color: kBrandGreen,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          const Icon(
+                                            Icons.arrow_forward_ios,
+                                            size: 10,
+                                            color: kBrandGreen,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                _NearYouCard(
+                                  park: _closestPark!,
+                                  imageUrl: _toImageUrl(_closestPark!.heroImage) ?? '',
+                                  distanceKm: _closestDistanceKm,
+                                  imageProviderFrom: _imageProviderFrom,
+                                  onTap: () => context.push(
+                                    AppRoutes.parkDetail(_closestPark!.id.toString()),
+                                  ),
+                                ),
+                                const SizedBox(height: 40),
+                              ],
+
+                              // TÍTULO VEM EXPLORAR
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const _SectionHeader(
+                                    label: 'Vem explorar',
+                                    color: kBrandGreen,
+                                  ),
+                                  GestureDetector(
+                                    onTap: () => context.push(AppRoutes.map),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Ver todos',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: kBrandGreen,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Icon(
+                                          Icons.arrow_forward_ios,
+                                          size: 10,
+                                          color: kBrandGreen,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                          ),
+                        ),
+
+                        // LISTA VEM EXPLORAR
+                        SizedBox(
+                          height: exploreCardHeight,
+                          child: _isLoading
+                              ? _ShimmerCardList(
+                                  width: exploreCardWidth,
+                                  height: exploreCardHeight,
+                                  radius: exploreCardRadius,
+                                )
+                              : _applyFilter(explorar).isEmpty
                                   ? const _EmptyLane()
                                   : ListView.separated(
                                       scrollDirection: Axis.horizontal,
-                                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 20),
                                       itemBuilder: (context, i) {
-                                        final item = _applyFilter(divertir)[i];
+                                        final item =
+                                            _applyFilter(explorar)[i];
                                         return _ExploreCard(
                                           item: item,
                                           color: kBrandGreen,
                                           badgeColor: kWhite,
-                                          width: smallCardWidth, 
-                                          height: smallCardHeight, 
-                                          radius: smallCardRadius, 
-                                          imageProviderFrom: _imageProviderFrom,
-                                          onTap: null, 
-                                        );
+                                          width: exploreCardWidth,
+                                          height: exploreCardHeight,
+                                          radius: exploreCardRadius,
+                                          imageProviderFrom:
+                                              _imageProviderFrom,
+                                          onTap: () => context.push(
+                                            AppRoutes.parkDetail(item.id),
+                                          ),
+                                          heroTag: 'park_${item.id}',
+                                        )
+                                          .animate(
+                                            delay: Duration(milliseconds: 80 * i),
+                                          )
+                                          .fadeIn(duration: 350.ms)
+                                          .slideX(
+                                            begin: 0.2,
+                                            end: 0,
+                                            curve: Curves.easeOut,
+                                          );
                                       },
-                                      separatorBuilder: (_, __) => const SizedBox(width: 16),
-                                      itemCount: _applyFilter(divertir).length,
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(width: 16),
+                                      itemCount:
+                                          _applyFilter(explorar).length,
                                     ),
-                            ),
-                            
-                            const SizedBox(height: 28),
-                          ],
                         ),
-                      ),
-                    ],
+
+                        const SizedBox(height: 40),
+                      ],
+                    ),
                   ),
+                ],
+              ),
       ),
     );
   }
-}
 
-/* ================== SUPORTES ================== */
 
-class _CollectionFields {
-  final List<String> title;
-  final List<String> image;
-  final List<String> status;
-  final List<String> slug;
-  const _CollectionFields({
-    required this.title,
-    required this.image,
-    required this.status,
-    required this.slug,
-  });
-}
+  Future<void> _determinePosition() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _calculateClosestPark(fallbackLat: -2.53073, fallbackLng: -44.3068);
+        return;
+      }
 
-class _LoadingHome extends StatelessWidget {
-  const _LoadingHome();
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          _calculateClosestPark(fallbackLat: -2.53073, fallbackLng: -44.3068);
+          return;
+        }
+      }
+      
+      if (permission == LocationPermission.deniedForever) {
+        _calculateClosestPark(fallbackLat: -2.53073, fallbackLng: -44.3068);
+        return;
+      }
 
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.only(top: 80),
-        child: CircularProgressIndicator(color: kBrandGreen),
-      ),
-    );
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.low),
+      );
+      
+      if (mounted) {
+        setState(() {
+          _currentPosition = position;
+        });
+        _calculateClosestPark();
+      }
+    } catch (e) {
+      debugPrint('Erro ao obter GPS: $e');
+      _calculateClosestPark(fallbackLat: -2.53073, fallbackLng: -44.3068);
+    }
+  }
+
+  void _calculateClosestPark({double? fallbackLat, double? fallbackLng}) {
+    if (_allParks.isEmpty) return;
+    
+    double refLat;
+    double refLng;
+    
+    if (_currentPosition != null) {
+      refLat = _currentPosition!.latitude;
+      refLng = _currentPosition!.longitude;
+    } else if (fallbackLat != null && fallbackLng != null) {
+      refLat = fallbackLat;
+      refLng = fallbackLng;
+    } else {
+      return;
+    }
+    
+    Park? closest;
+    double minDistance = double.infinity;
+    
+    for (final p in _allParks) {
+      if (p.latitude != null && p.longitude != null) {
+        final dist = Geolocator.distanceBetween(
+          refLat,
+          refLng,
+          p.latitude!,
+          p.longitude!,
+        );
+        if (dist < minDistance) {
+          minDistance = dist;
+          closest = p;
+        }
+      }
+    }
+    
+    if (closest != null && mounted) {
+      setState(() {
+        _closestPark = closest;
+        _closestDistanceKm = minDistance / 1000.0;
+      });
+    }
   }
 }
+
+/* ================== SUPORTE ================== */
+
+
 
 class _ErrorHome extends StatelessWidget {
   const _ErrorHome({required this.message, required this.onRetry});
@@ -536,27 +596,35 @@ class _ErrorHome extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, color: Colors.redAccent, size: 40),
+            const Icon(Icons.error_outline,
+                color: Colors.redAccent, size: 40),
             const SizedBox(height: 12),
             Text(
               'Não foi possível carregar os dados.',
-              style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600),
+              style: GoogleFonts.poppins(
+                  fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 12, color: Colors.black54, height: 1.3),
+              style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  color: Colors.black54,
+                  height: 1.3),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: kBrandGreen),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: kBrandGreen),
               onPressed: onRetry,
-              child: const Text('Tentar novamente', style: TextStyle(color: Colors.white)),
+              child: const Text('Tentar novamente',
+                  style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -573,7 +641,8 @@ class _EmptyLane extends StatelessWidget {
     return Center(
       child: Text(
         'Nenhum item encontrado.',
-        style: GoogleFonts.poppins(fontSize: 13, color: kDarkGray.withOpacity(.7)),
+        style: GoogleFonts.poppins(
+            fontSize: 13, color: kDarkGray.withValues(alpha: .7)),
       ),
     );
   }
@@ -584,34 +653,47 @@ class _EmptyLane extends StatelessWidget {
 class _Avatar extends StatelessWidget {
   const _Avatar();
 
+  String? _getFullAvatarUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    
+    if (url.startsWith('http')) {
+      if (url.contains('apps.sitw.com.br') && !url.contains('/backend-park/')) {
+        return url.replaceFirst('apps.sitw.com.br/', 'apps.sitw.com.br/backend-park/');
+      }
+      return url;
+    }
+    
+    final baseUrl = ApiConfig.baseUrl.replaceAll('/api/v1', '');
+    final cleanPath = url.startsWith('/') ? url.substring(1) : url;
+    return '$baseUrl/$cleanPath';
+  }
+
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<Map<String, dynamic>?>(
-      future: AuthService.instance.me(),
-      builder: (context, snapshot) {
-        String? avatarUrl;
-        if (snapshot.hasData && snapshot.data != null) {
-          final me = snapshot.data!;
-          final avatarData = me['avatar'];
-          if (avatarData is Map && avatarData['url'] != null) {
-             String url = avatarData['url'];
-             if (!url.startsWith('http')) {
-               url = '$kStrapiBaseUrl$url';
-             }
-             avatarUrl = url;
-          }
-        }
+    final me = context.watch<AuthService>().currentUser;
+    String? avatarUrl;
 
-        return CircleAvatar(
-          // --- CORREÇÃO: Raio 24 para ficar 48x48 ---
-          radius: 24,
-          backgroundColor: const Color(0xFFE1E1E5), // CSS #E1E1E5
-          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-          child: avatarUrl == null
-              ? const Icon(Icons.person, color: Colors.white70, size: 24) // Ícone menor
-              : null,
-        );
-      },
+    if (me != null) {
+      avatarUrl = _getFullAvatarUrl(me['avatar_url']);
+      
+      // Fallback para caso seja o antigo objeto Strapi (Map)
+      if (avatarUrl == null) {
+        final avatarData = me['avatar'];
+        if (avatarData is Map && avatarData['url'] != null) {
+          avatarUrl = _getFullAvatarUrl(avatarData['url']);
+        }
+      }
+    }
+
+    return CircleAvatar(
+      radius: 24,
+      backgroundColor: const Color(0xFFE1E1E5),
+      backgroundImage:
+          avatarUrl != null ? NetworkImage(avatarUrl) : null,
+      child: avatarUrl == null
+          ? const Icon(Icons.person,
+              color: Colors.white70, size: 24)
+          : null,
     );
   }
 }
@@ -622,16 +704,16 @@ class _NotificationBell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 40, 
-      height: 40, 
+      width: 40,
+      height: 40,
       decoration: const BoxDecoration(
-        color: kFigmaBellBg, 
-        shape: BoxShape.circle, 
+        color: kFigmaBellBg,
+        shape: BoxShape.circle,
       ),
       child: const Icon(
         Icons.notifications_none_outlined,
-        color: kBrandGreen, 
-        size: 24, 
+        color: kBrandGreen,
+        size: 24,
       ),
     );
   }
@@ -654,28 +736,31 @@ class _SearchBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final border = OutlineInputBorder(
       borderRadius: BorderRadius.circular(16),
-      borderSide: const BorderSide(color: kBrandGreen, width: 2.0),
+      borderSide:
+          const BorderSide(color: kBrandGreen, width: 2.0),
     );
 
     return TextField(
       controller: controller,
       onSubmitted: onSubmitted,
       textInputAction: TextInputAction.search,
-      style: GoogleFonts.poppins(fontSize: 14, color: kDarkGray),
+      style: GoogleFonts.poppins(
+          fontSize: 14, color: kDarkGray),
       decoration: InputDecoration(
-        filled: true, 
-        fillColor: kFigmaSearchFill, 
+        filled: true,
+        fillColor: kFigmaSearchFill,
         hintText: hint,
-        hintStyle: GoogleFonts.poppins(color: kFigmaSearchHint),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+        hintStyle:
+            GoogleFonts.poppins(color: kFigmaSearchHint),
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12, vertical: 16),
         enabledBorder: border,
-        focusedBorder: border, 
+        focusedBorder: border,
         suffixIcon: const Padding(
           padding: EdgeInsets.only(right: 12.0),
           child: Icon(
             Icons.search_rounded,
-            color: kDarkGray, 
+            color: kDarkGray,
             size: 28,
           ),
         ),
@@ -684,21 +769,23 @@ class _SearchBar extends StatelessWidget {
   }
 }
 
+// QUICK ACTION
 class _QuickAction extends StatelessWidget {
   const _QuickAction({
-    required this.iconAsset,
+    this.iconAsset,
+    this.iconData,
     required this.label,
     required this.color,
-    this.size = 80, 
-    this.radius = 24,
     this.onTap,
-  });
+  }) : assert(
+          iconAsset != null || iconData != null,
+          'Informe iconAsset ou iconData',
+        );
 
-  final String iconAsset;
+  final String? iconAsset;
+  final IconData? iconData;
   final String label;
   final Color color;
-  final double size;
-  final double radius;
   final VoidCallback? onTap;
 
   @override
@@ -710,25 +797,43 @@ class _QuickAction extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: size,
-            height: size,
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: color,
-              borderRadius: BorderRadius.circular(radius),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 6))],
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-            child: Center(
-              child: SvgPicture.asset(
-                iconAsset,
-                colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
-              ),
-            ),
+            child: iconAsset != null
+                ? SvgPicture.asset(
+                    iconAsset!,
+                    colorFilter: const ColorFilter.mode(
+                      Colors.white,
+                      BlendMode.srcIn,
+                    ),
+                    width: 24,
+                    height: 24,
+                  )
+                : Icon(
+                    iconData,
+                    color: Colors.white,
+                    size: 24,
+                  ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             label,
-            style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF32384A), height: 1.2),
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF32384A),
+              height: 1.2,
+            ),
           ),
         ],
       ),
@@ -736,34 +841,7 @@ class _QuickAction extends StatelessWidget {
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({
-    required this.title,
-    required this.subtitle,
-    required this.color,
-    this.subtitleColor,
-  });
 
-  final String title;
-  final String subtitle;
-  final Color color;
-  final Color? subtitleColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionHeader(label: title, color: color),
-        const SizedBox(height: 6),
-        Text(
-          subtitle,
-          style: GoogleFonts.poppins(fontSize: 13, color: subtitleColor ?? const Color(0xFF6B6B6B), height: 1.3),
-        ),
-      ],
-    );
-  }
-}
 
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.label, required this.color});
@@ -774,7 +852,159 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       label,
-      style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w800, color: color, height: 1.1),
+      style: GoogleFonts.poppins(
+        fontSize: 20,
+        fontWeight: FontWeight.w800,
+        color: color,
+        height: 1.1,
+      ),
+    );
+  }
+}
+
+class _NearYouCard extends StatelessWidget {
+  const _NearYouCard({
+    required this.park,
+    required this.imageUrl,
+    required this.distanceKm,
+    required this.imageProviderFrom,
+    this.onTap,
+  });
+
+  final Park park;
+  final String imageUrl;
+  final double? distanceKm;
+  final ImageProvider Function(String) imageProviderFrom;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImage = imageUrl.trim().isNotEmpty;
+
+    final childImage = hasImage
+        ? Image(image: imageProviderFrom(imageUrl), fit: BoxFit.cover)
+        : Container(color: const Color(0xFFEFEFEF));
+
+    final distanceStr = distanceKm != null
+        ? '${distanceKm!.toStringAsFixed(1).replaceAll('.', ',')} km'
+        : '2,4 km';
+
+    final addressStr = park.description != null && park.description!.contains('Rua')
+        ? 'São Luís, MA'
+        : 'Av. Sen. Vitorino Freire, 1000';
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        height: 220,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Hero(tag: 'park_near_${park.id}', child: childImage),
+              ),
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.1),
+                        Colors.black.withValues(alpha: 0.6),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              Positioned(
+                right: 16,
+                top: 16,
+                child: FavoriteButton(
+                  parkDocumentId: park.documentId,
+                  size: 36,
+                ),
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            park.name,
+                            style: GoogleFonts.poppins(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.location_on,
+                                size: 14,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  '$addressStr • $distanceStr',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: Colors.white.withValues(alpha: 0.9),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.arrow_forward_rounded,
+                        color: kBrandGreen,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -791,6 +1021,7 @@ class _ExploreCard extends StatelessWidget {
     required this.height,
     required this.radius,
     this.onTap,
+    this.heroTag,
   });
 
   final _CardItem item;
@@ -801,10 +1032,16 @@ class _ExploreCard extends StatelessWidget {
   final double height;
   final double radius;
   final VoidCallback? onTap;
+  final String? heroTag;
 
   @override
   Widget build(BuildContext context) {
     final hasImage = item.image.trim().isNotEmpty;
+
+    final childImage = hasImage
+        ? Image(image: imageProviderFrom(item.image), fit: BoxFit.cover)
+        : Container(color: const Color(0xFFEFEFEF));
+
     return InkWell(
       onTap: onTap,
       child: SizedBox(
@@ -815,9 +1052,9 @@ class _ExploreCard extends StatelessWidget {
           child: Stack(
             children: [
               Positioned.fill(
-                child: hasImage
-                    ? Image(image: imageProviderFrom(item.image), fit: BoxFit.cover)
-                    : Container(color: const Color(0xFFEFEFEF)),
+                child: heroTag == null
+                    ? childImage
+                    : Hero(tag: heroTag!, child: childImage),
               ),
               Positioned.fill(
                 child: DecoratedBox(
@@ -825,7 +1062,10 @@ class _ExploreCard extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Colors.black.withOpacity(0.05), Colors.black.withOpacity(0.45)],
+                      colors: [
+                        Colors.black.withValues(alpha: 0.05),
+                        Colors.black.withValues(alpha: 0.45),
+                      ],
                     ),
                   ),
                 ),
@@ -834,8 +1074,10 @@ class _ExploreCard extends StatelessWidget {
                 Positioned(
                   right: 10,
                   top: 10,
-                  // --- CORREÇÃO: Passa o 'documentId' para o botão ---
-                  child: FavoriteButton(parkDocumentId: item.id, size: 32),
+                  child: FavoriteButton(
+                    parkDocumentId: item.id,
+                    size: 32,
+                  ),
                 ),
               Positioned(
                 left: 14,
@@ -846,10 +1088,11 @@ class _ExploreCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text( // Título
+                          Text(
                             item.title,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -858,21 +1101,42 @@ class _ExploreCard extends StatelessWidget {
                               height: 1.1,
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
-                              shadows: const [Shadow(blurRadius: 10, color: Colors.black38, offset: Offset(0, 1))],
+                              shadows: const [
+                                Shadow(
+                                  blurRadius: 10,
+                                  color: Colors.black38,
+                                  offset: Offset(0, 1),
+                                )
+                              ],
                             ),
                           ),
-                          
-                          const SizedBox(height: 16), 
-                          if ((item.status ?? '').isNotEmpty) 
+                          const SizedBox(height: 16),
+                          if ((item.status ?? '').isNotEmpty)
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(color: badgeColor.withOpacity(.94), borderRadius: BorderRadius.circular(14)), 
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: badgeColor.withValues(alpha: .94),
+                                borderRadius:
+                                    BorderRadius.circular(14),
+                              ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.circle, size: 8, color: Colors.green),
+                                  const Icon(
+                                    Icons.circle,
+                                    size: 8,
+                                    color: Colors.green,
+                                  ),
                                   const SizedBox(width: 6),
-                                  Text(item.status!, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700)),
+                                  Text(
+                                    item.status!,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -880,14 +1144,19 @@ class _ExploreCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    
                     InkWell(
                       onTap: onTap,
                       child: Container(
                         width: 44,
                         height: 44,
-                        decoration: const BoxDecoration(color: kWhite, shape: BoxShape.circle), 
-                        child: const Icon(Icons.arrow_forward_rounded, color: kBrandGreen), 
+                        decoration: const BoxDecoration(
+                          color: kWhite,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: kBrandGreen,
+                        ),
                       ),
                     ),
                   ],
@@ -901,80 +1170,8 @@ class _ExploreCard extends StatelessWidget {
   }
 }
 
-
-/* ====== BOTÃO LOTTIE (mantive caso use em outra parte) ====== */
-class _FavLottieButton extends StatefulWidget {
-  const _FavLottieButton({
-    super.key,
-    this.initialValue = false,
-    this.onChanged,
-    this.size = 56,
-  });
-
-  final bool initialValue;
-  final ValueChanged<bool>? onChanged;
-  final double size;
-
-  @override
-  State<_FavLottieButton> createState() => _FavLottieButtonState();
-}
-
-class _FavLottieButtonState extends State<_FavLottieButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late bool _isFav;
-
-  @override
-  void initState() {
-    super.initState();
-    _isFav = widget.initialValue;
-    _ctrl = AnimationController(vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _toggle() async {
-    final next = !_isFav;
-    setState(() => _isFav = next);
-
-    if (next) {
-      await _ctrl.forward(from: 0);
-    } else {
-      await _ctrl.reverse(from: 1);
-    }
-
-    widget.onChanged?.call(next);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: _toggle,
-      child: SizedBox(
-        width: widget.size,
-        height: widget.size,
-        child: Lottie.asset(
-          'assets/lottie/heart.json',
-          controller: _ctrl,
-          repeat: false,
-          onLoaded: (comp) {
-            _ctrl.duration = comp.duration;
-            if (_isFav) _ctrl.value = 1.0;
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/* ================== MODELO ================== */
 class _CardItem {
-  final String id;           // 'slug' ou 'id_parque' (documentId)
+  final String id; // documentId/slug/id
   final String title;
   final String image;
   final String? status;
@@ -987,4 +1184,39 @@ class _CardItem {
     this.status,
     this.withFavorite = false,
   });
+}
+
+// ── Shimmer placeholder para lista horizontal de cards ──────────────────────
+class _ShimmerCardList extends StatelessWidget {
+  const _ShimmerCardList({
+    required this.width,
+    required this.height,
+    required this.radius,
+  });
+
+  final double width;
+  final double height;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer.fromColors(
+      baseColor: const Color(0xFFE8EDE4),
+      highlightColor: const Color(0xFFF5F8F2),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: 3,
+        separatorBuilder: (_, __) => const SizedBox(width: 16),
+        itemBuilder: (_, __) => ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: Container(
+            width: width,
+            height: height,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -1,16 +1,16 @@
-import 'dart:io'; 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart'; 
-import 'package:image_picker/image_picker.dart'; 
-import 'package:http/http.dart' as http; 
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/app_toast.dart';
+import 'profile_edit_screen.dart';
+import 'preferencias_screen.dart';
+import '../../core/api/api_config.dart';
 
 const _green = Color(0xFF669340);
 const _dark  = Color(0xFF32384A);
-
-// ADICIONE A URL DO SEU STRAPI AQUI
-const String kStrapiBaseUrl = 'http://192.168.15.12:1337';
 
 class UserScreen extends StatefulWidget {
   const UserScreen({super.key, this.onChanged});
@@ -26,12 +26,19 @@ class _UserScreenState extends State<UserScreen> {
   @override
   void initState() {
     super.initState();
-    _meFuture = AuthService.instance.me();
+    _loadData();
+  }
+
+  void _loadData() {
+    final cached = AuthService.instance.currentUser;
+    _meFuture = cached != null
+        ? Future.value(cached)
+        : AuthService.instance.me();
   }
 
   void _refreshUserData() {
     setState(() {
-      _meFuture = AuthService.instance.me(); 
+      _loadData();
     });
   }
 
@@ -60,14 +67,11 @@ class _UserScreenState extends State<UserScreen> {
         }
 
         final me = snap.data!;
-        final nome = me['name'] ?? '${me['first_name'] ?? ''} ${me['last_name'] ?? ''}'.trim();
+        final nome = me['nome'] ?? me['name'] ?? '';
         final email = (me['email'] ?? '').toString();
-        final displayName = nome.isEmpty ? email : nome;
+        final displayName = nome.toString().isEmpty ? email : nome.toString();
         
-        final avatarData = me['avatar'];
-        final String? avatarUrl = (avatarData is Map && avatarData['url'] != null) 
-                                    ? avatarData['url'] 
-                                    : null;
+        final String? avatarUrl = me['avatar_url'];
 
         return Scaffold(
           backgroundColor: Colors.white, 
@@ -102,7 +106,7 @@ class _UserScreenState extends State<UserScreen> {
                   email,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
-                    color: _dark.withOpacity(0.7),
+                    color: _dark.withValues(alpha: 0.7),
                   ),
                 ),
               ),
@@ -111,9 +115,33 @@ class _UserScreenState extends State<UserScreen> {
               const Divider(height: 1, color: Color(0xFFEEEEEE)),
 
               const SizedBox(height: 16),
-              const _Item(icon: Icons.person_outline, title: 'Dados pessoais'),
-              const _Item(icon: Icons.calendar_month_outlined, title: 'Minhas reservas'),
-              const _Item(icon: Icons.settings_outlined, title: 'Preferências'),
+              _Item(
+                icon: Icons.person_outline, 
+                title: 'Dados pessoais',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const ProfileEditScreen(),
+                    ),
+                  ).then((_) => _refreshUserData());
+                },
+              ),
+              _Item(
+                icon: Icons.calendar_month_outlined,
+                title: 'Minhas reservas',
+                onTap: () => context.push('/tabs/user/minhas-reservas'),
+              ),
+              _Item(
+                icon: Icons.settings_outlined, 
+                title: 'Preferências',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const PreferenciasScreen(),
+                    ),
+                  );
+                },
+              ),
               const SizedBox(height: 24),
 
               FilledButton(
@@ -126,12 +154,10 @@ class _UserScreenState extends State<UserScreen> {
                 ),
                 onPressed: () async {
                   await AuthService.instance.logout();
-                  widget.onChanged?.call(); 
+                  widget.onChanged?.call();
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Você saiu da conta.')),
-                    );
-                    context.go('/tabs/user'); 
+                    AppToast.show(context, 'Você saiu da conta.', type: ToastType.warning);
+                    context.go('/tabs/user');
                   }
                 },
                 child: Row(
@@ -157,11 +183,13 @@ class _UserScreenState extends State<UserScreen> {
   }
 }
 
-// Widget _Item (Menu)
 class _Item extends StatelessWidget {
   final IconData icon;
   final String title;
-  const _Item({required this.icon, required this.title});
+  final VoidCallback? onTap; 
+  
+  const _Item({required this.icon, required this.title, this.onTap}); 
+  
   @override
   Widget build(BuildContext context) {
     return ListTile(
@@ -175,9 +203,7 @@ class _Item extends StatelessWidget {
         ),
       ),
       trailing: const Icon(Icons.chevron_right, color: _dark, size: 20),
-      onTap: () {
-        // TODO: navegações específicas
-      },
+      onTap: onTap,
     );
   }
 }
@@ -202,54 +228,69 @@ class _AvatarEditState extends State<_AvatarEdit> {
   final ImagePicker _picker = ImagePicker();
 
   String? _getFullAvatarUrl(String? url) {
-    if (url == null) return null;
-    if (url.startsWith('http')) return url;
-    if (url.startsWith('/')) return '$kStrapiBaseUrl$url';
-    return '$kStrapiBaseUrl/$url';
+    if (url == null || url.isEmpty) return null;
+    
+    if (url.startsWith('http')) {
+      if (url.contains('apps.sitw.com.br') && !url.contains('/backend-park/')) {
+        return url.replaceFirst('apps.sitw.com.br/', 'apps.sitw.com.br/backend-park/');
+      }
+      return url;
+    }
+    
+    final baseUrl = ApiConfig.baseUrl.replaceAll('/api/v1', '');
+    final cleanPath = url.startsWith('/') ? url.substring(1) : url;
+    return '$baseUrl/$cleanPath';
   }
 
   Future<void> _pickAndUploadImage() async {
-    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+    final XFile? image = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+    );
     if (image == null) return; 
 
     setState(() => _isUploading = true);
 
     try {
       final token = await AuthService.instance.token();
-      if (token == null) throw Exception('Usuário não autenticado');
+      final uri = Uri.parse('${ApiConfig.baseUrl}/me/avatar');
 
-      final uri = Uri.parse('$kStrapiBaseUrl/api/upload');
       final request = http.MultipartRequest('POST', uri);
       
-      request.headers['Authorization'] = 'Bearer $token';
-      request.files.add(await http.MultipartFile.fromPath('files', image.path));
-      
-      request.fields['ref'] = 'plugin::users-permissions.user'; 
-      request.fields['refId'] = widget.userId; 
-      request.fields['field'] = 'avatar'; 
-
-      final response = await request.send();
-
-      // --- CORREÇÃO AQUI ---
-      // Agora aceita 200 (OK) ou 201 (Created) como sucesso!
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        // --- FIM DA CORREÇÃO ---
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Foto de perfil atualizada!')),
-        );
-        widget.onUploadComplete(); 
-      } else {
-        final respStr = await response.stream.bytesToString();
-        throw Exception('Falha no upload: ${response.statusCode} $respStr');
+      if (token != null && token.isNotEmpty) {
+        request.headers['Authorization'] = 'Bearer $token';
       }
 
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao enviar imagem: $e')),
+      final bytes = await image.readAsBytes();
+      final multipartFile = http.MultipartFile.fromBytes(
+        'avatar',
+        bytes,
+        filename: image.name,
       );
+      request.files.add(multipartFile);
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        await AuthService.instance.me();
+        widget.onUploadComplete();
+        if (mounted) {
+          AppToast.show(context, 'Foto de perfil atualizada com sucesso!', type: ToastType.success);
+        }
+      } else {
+        if (mounted) {
+          AppToast.show(context, 'Erro no upload: ${response.statusCode}', type: ToastType.error);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppToast.show(context, 'Erro ao enviar imagem: $e', type: ToastType.error);
+      }
     } finally {
-      setState(() => _isUploading = false);
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
     }
   }
 
@@ -267,8 +308,8 @@ class _AvatarEditState extends State<_AvatarEdit> {
             radius: 48, 
             backgroundColor: const Color(0xFFE1E1E5), 
             backgroundImage: fullAvatarUrl != null 
-                              ? NetworkImage(fullAvatarUrl) 
-                              : null,
+                               ? NetworkImage(fullAvatarUrl) 
+                               : null,
             child: (fullAvatarUrl == null && !_isUploading)
                 ? const Icon(Icons.person, size: 48, color: Colors.white70)
                 : null,
@@ -301,7 +342,7 @@ class _AvatarEditState extends State<_AvatarEdit> {
               width: 96,
               height: 96,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withValues(alpha: 0.5),
                 shape: BoxShape.circle,
               ),
               child: const Center(
