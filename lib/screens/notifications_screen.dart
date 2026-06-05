@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../data/models/app_notification.dart';
 import '../providers/notification_provider.dart';
+
+const _green = Color(0xFF669340);
+const _dark = Color(0xFF32384A);
+const _lightGray = Color(0xFF8F959E);
+const _cardBg = Color(0xFFF9FAE8);
+const _orange = Color(0xFFE07B39);
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -27,29 +34,51 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final notifications = provider.notifications;
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Notificações'),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: _green, size: 18),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(
+          'Notificações',
+          style: GoogleFonts.poppins(
+            color: _green,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        centerTitle: true,
         actions: [
           if (notifications.isNotEmpty)
             TextButton(
               onPressed: () => _confirmClear(context, provider),
-              child: const Text('Limpar tudo'),
+              child: Text(
+                'Limpar',
+                style: GoogleFonts.poppins(
+                  color: _green,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
         ],
       ),
       body: notifications.isEmpty
           ? const _EmptyState()
           : ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
               itemCount: notifications.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 1, indent: 72),
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, i) {
                 final n = notifications[i];
-                return _NotificationTile(
+                return _NotificationCard(
                   key: ValueKey(n.id),
                   notification: n,
-                  onDismissed: () => provider.delete(n.id),
+                  onDelete: () => provider.delete(n.id),
                   onTap: n.deeplink != null
                       ? () => context.push(n.deeplink!)
                       : null,
@@ -64,16 +93,32 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Limpar notificações'),
-        content: const Text('Remover todas as notificações?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Limpar notificações',
+          style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w700, color: _dark, fontSize: 16),
+        ),
+        content: Text(
+          'Remover todas as notificações?',
+          style: GoogleFonts.poppins(fontSize: 14, color: _lightGray),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
+            child: Text(
+              'Cancelar',
+              style: GoogleFonts.poppins(color: _lightGray),
+            ),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: _green,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Limpar'),
+            child: Text('Limpar', style: GoogleFonts.poppins()),
           ),
         ],
       ),
@@ -82,50 +127,115 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 }
 
-class _NotificationTile extends StatelessWidget {
-  const _NotificationTile({
+// ─── Card ──────────────────────────────────────────────────────────────────────
+
+class _NotificationCard extends StatelessWidget {
+  const _NotificationCard({
     super.key,
     required this.notification,
-    required this.onDismissed,
+    required this.onDelete,
     this.onTap,
   });
 
   final AppNotification notification;
-  final VoidCallback onDismissed;
+  final VoidCallback onDelete;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Dismissible(
-      key: ValueKey(notification.id),
-      direction: DismissDirection.endToStart,
-      onDismissed: (_) => onDismissed(),
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 24),
-        color: Colors.red.shade400,
-        child: const Icon(Icons.delete_outline, color: Colors.white, size: 24),
-      ),
-      child: ListTile(
-        tileColor: notification.isRead ? null : const Color(0xFFF5F7EB),
-        onTap: onTap,
-        leading: _TypeIcon(type: notification.type),
-        title: Text(
-          notification.title,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(16),
         ),
-        subtitle: Text(
-          notification.body,
-          style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Ícone por tipo
+            _TypeIcon(type: notification.type),
+            const SizedBox(width: 12),
+
+            // Conteúdo
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          notification.title,
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: _dark,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Ponto de não-lido + tempo
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!notification.isRead)
+                            Container(
+                              width: 7,
+                              height: 7,
+                              margin: const EdgeInsets.only(right: 4, top: 4),
+                              decoration: const BoxDecoration(
+                                color: _green,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          Text(
+                            _relativeTime(notification.createdAt),
+                            style: GoogleFonts.poppins(
+                                fontSize: 11, color: _lightGray),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    notification.body,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: _lightGray,
+                      height: 1.4,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (onTap != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ver detalhes →',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _green,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            // Lixeira
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onDelete,
+              child: const Icon(Icons.delete_outline,
+                  color: Color(0xFFE53935), size: 20),
+            ),
+          ],
         ),
-        trailing: Text(
-          _relativeTime(notification.createdAt),
-          style: const TextStyle(fontSize: 11, color: Color(0xFF999999)),
-        ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       ),
     );
   }
@@ -142,6 +252,8 @@ class _NotificationTile extends StatelessWidget {
   }
 }
 
+// ─── Ícone por tipo ────────────────────────────────────────────────────────────
+
 class _TypeIcon extends StatelessWidget {
   const _TypeIcon({required this.type});
   final String type;
@@ -149,38 +261,58 @@ class _TypeIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, color) = switch (type) {
-      'reservation_status' => (Icons.calendar_today, const Color(0xFF669340)),
-      'event' => (Icons.event, const Color(0xFFE07B39)),
-      _ => (Icons.campaign_outlined, const Color(0xFF999999)),
+      'reservation_status' => (Icons.calendar_today_outlined, _green),
+      'event' => (Icons.event_outlined, _orange),
+      _ => (Icons.campaign_outlined, _lightGray),
     };
 
     return Container(
-      width: 40,
-      height: 40,
+      width: 42,
+      height: 42,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        shape: BoxShape.circle,
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Icon(icon, color: color, size: 20),
     );
   }
 }
 
+// ─── Estado vazio ──────────────────────────────────────────────────────────────
+
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.notifications_none_outlined,
-              size: 64, color: Color(0xFFCCCCCC)),
-          SizedBox(height: 16),
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: _green.withValues(alpha: 0.10),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.notifications_none_outlined,
+                size: 40, color: _green),
+          ),
+          const SizedBox(height: 20),
           Text(
             'Nenhuma notificação ainda',
-            style: TextStyle(fontSize: 16, color: Color(0xFF999999)),
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: _dark,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Quando houver novidades,\naparecerão aqui.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(fontSize: 13, color: _lightGray),
           ),
         ],
       ),
