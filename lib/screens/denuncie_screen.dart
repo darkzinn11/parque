@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../core/api/api_client.dart';
 import '../core/api/api_config.dart';
+import '../core/formatters.dart';
 import '../services/auth_service.dart';
 import '../services/cep_service.dart';
 import '../widgets/app_toast.dart';
@@ -17,46 +18,6 @@ import '../widgets/app_toast.dart';
 const kBrandGreen = Color(0xFF669340);
 const kDarkGray = Color(0xFF32384A);
 const kSubtitleColor = Color(0xFF6B7280);
-
-// ─── Formatadores ─────────────────────────────────────────────────────────────
-
-class _PhoneFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-      TextEditingValue old, TextEditingValue nv) {
-    final digits = nv.text.replaceAll(RegExp(r'\D'), '');
-    final buf = StringBuffer();
-    for (int i = 0; i < digits.length && i < 11; i++) {
-      if (i == 0) buf.write('(');
-      if (i == 2) buf.write(') ');
-      if (i == 7) buf.write('-');
-      buf.write(digits[i]);
-    }
-    final text = buf.toString();
-    return nv.copyWith(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
-  }
-}
-
-class _CepFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-      TextEditingValue old, TextEditingValue nv) {
-    final digits = nv.text.replaceAll(RegExp(r'\D'), '');
-    final buf = StringBuffer();
-    for (int i = 0; i < digits.length && i < 8; i++) {
-      if (i == 5) buf.write('-');
-      buf.write(digits[i]);
-    }
-    final text = buf.toString();
-    return nv.copyWith(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
-  }
-}
 
 // ─── Tela ─────────────────────────────────────────────────────────────────────
 
@@ -442,7 +403,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                       controller: _celularController,
                       icon: Icons.phone_outlined,
                       type: TextInputType.phone,
-                      formatters: [_PhoneFormatter()],
+                      formatters: [PhoneFormatter()],
                       validator: (v) {
                         if (v == null || v.trim().isEmpty) return 'Informe o celular';
                         final digits = v.replaceAll(RegExp(r'\D'), '');
@@ -501,7 +462,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                         hint: 'CEP',
                         controller: _cepController!,
                         type: TextInputType.number,
-                        formatters: [_CepFormatter()],
+                        formatters: [CepFormatter()],
                         onChanged: _onCepEnderecoChanged,
                         suffixLoading: _loadingCepEndereco,
                       ),
@@ -544,7 +505,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                       hint: 'CEP do local (opcional)',
                       controller: _cepLocalController,
                       type: TextInputType.number,
-                      formatters: [_CepFormatter()],
+                      formatters: [CepFormatter()],
                       onChanged: _onCepLocalChanged,
                       suffixLoading: _loadingCepLocal,
                     ),
