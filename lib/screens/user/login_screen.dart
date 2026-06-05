@@ -151,11 +151,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     final sent = await _auth.requestPasswordReset(email);
     if (!mounted) return;
-    AppToast.show(
-      context,
-      sent ? 'Enviamos instruções para seu e-mail.' : 'Não foi possível enviar o e-mail.',
-      type: sent ? ToastType.success : ToastType.error,
-    );
+
+    if (sent) {
+      context.push('/verificar-codigo', extra: {'email': email});
+    } else {
+      AppToast.show(context, 'Não foi possível enviar o código.', type: ToastType.error);
+    }
     widget.onForgotDone?.call();
   }
 

@@ -43,6 +43,8 @@ import '../screens/reservations/booking_calendar_screen.dart';
 import '../screens/reservations/reservation_form_screen.dart';
 import '../screens/reservations/my_reservations_screen.dart';
 import '../screens/notifications_screen.dart';
+import '../screens/user/verificar_codigo_screen.dart';
+import '../screens/user/nova_senha_screen.dart';
 import '../data/models/reservation.dart';
 
 abstract class AppRoutes {
@@ -113,6 +115,27 @@ final GoRouter appRouter = GoRouter(
       path: AppRoutes.userRegisterOk,
       name: 'user_register_success',
       builder: (context, state) => const RegisterSuccessScreen(),
+    ),
+
+    // ========= RECUPERAÇÃO DE SENHA =========
+    GoRoute(
+      path: '/verificar-codigo',
+      name: 'verificar_codigo',
+      builder: (context, state) {
+        final extra = state.extra as Map<String, dynamic>? ?? {};
+        return VerificarCodigoScreen(email: extra['email']?.toString() ?? '');
+      },
+    ),
+    GoRoute(
+      path: '/nova-senha',
+      name: 'nova_senha',
+      builder: (context, state) {
+        final extra = state.extra as Map<String, dynamic>? ?? {};
+        return NovaSenhaScreen(
+          email: extra['email']?.toString() ?? '',
+          code: extra['code']?.toString() ?? '',
+        );
+      },
     ),
 
     // ========= TELA SOLTA: PARK DETAIL (GLOBAL) =========

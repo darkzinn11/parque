@@ -114,6 +114,14 @@ class AuthService extends ChangeNotifier {
 
   Future<bool> isLogged() async => (await token()) != null;
 
+  /// Login direto com token já obtido (ex: após reset de senha).
+  Future<void> loginWithToken(String token, Map<String, dynamic>? user) async {
+    _tokenCache = token;
+    await _storage.write(key: _tokenKey, value: token);
+    if (user != null) _userCache = user;
+    notifyListeners();
+  }
+
   // ======================================================
   // SIGNUP (Contrato Go)
   // ======================================================
