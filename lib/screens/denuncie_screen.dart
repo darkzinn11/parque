@@ -93,6 +93,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     _enderecoDenunciaController.dispose();
     _pontoReferenciaController.dispose();
     _descricaoController.dispose();
+    AuthService.instance.removeListener(_onAuthChanged);
     super.dispose();
   }
 
@@ -100,6 +101,16 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   void initState() {
     super.initState();
     _preencherDadosUsuario();
+    // Ouve login feito enquanto a tela já estava na pilha
+    AuthService.instance.addListener(_onAuthChanged);
+  }
+
+  void _onAuthChanged() {
+    // Só preenche se os campos ainda estiverem vazios (não sobrescreve edição manual)
+    if (AuthService.instance.currentUser != null &&
+        _emailController.text.isEmpty) {
+      _preencherDadosUsuario();
+    }
   }
 
   void _preencherDadosUsuario() {
