@@ -30,13 +30,18 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
   int _selectedDateIndex = 0;
 
   List<String> _slots = [];
-  int _selectedSlotIndex = -1;
+  String? _selectedSlotValue;
 
   @override
   void initState() {
     super.initState();
     _generateDates();
     _loadSpaceAndSlots();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   void _generateDates() {
@@ -68,7 +73,7 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
     if (_space == null) return;
     setState(() {
       _isLoadingSlots = true;
-      _selectedSlotIndex = -1;
+      _selectedSlotValue = null;
     });
 
     final date = _dates[_selectedDateIndex];
@@ -99,13 +104,13 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
   }
 
   void _continue() {
-    if (_selectedSlotIndex == -1) {
+    if (_selectedSlotValue == null) {
       AppToast.show(context, 'Por favor, selecione um horário.', type: ToastType.error);
       return;
     }
 
     final dateStr = DateFormat('yyyy-MM-dd').format(_dates[_selectedDateIndex]);
-    final slot = _slots[_selectedSlotIndex];
+    final slot = _selectedSlotValue!;
     final times = slot.split(' - ');
     final startTime = times[0];
     final endTime = times.length > 1 ? times[1] : '';
@@ -120,6 +125,7 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
         'data': dateStr,
         'horaInicio': startTime,
         'horaFim': endTime,
+        'numParticipants': 1, // participantes adicionados na próxima tela
       },
     );
   }
@@ -133,14 +139,14 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: _green, size: 18),
+          icon: const Icon(Icons.arrow_back_ios_new, color: _green),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
-          'Escolha data e horário',
+          'Seleção de Data e Horário',
           style: GoogleFonts.poppins(
             color: _green,
-            fontSize: 18,
+            fontSize: 20,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -155,137 +161,138 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
                   child: ListView(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     children: [
-                      // Carrossel de datas semanais
-                      SizedBox(
-                        height: 76,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          itemCount: _dates.length,
-                          itemBuilder: (context, index) {
-                            final date = _dates[index];
-                            final isSelected = index == _selectedDateIndex;
-                            final dayLabel = _getDayLabel(date);
+                      // Espaço Título
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          _space?.name ?? '',
+                          style: GoogleFonts.poppins(
+                            color: _green,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // Subtítulo
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          'Selecione data, horário para criar o agendamento',
+                          style: GoogleFonts.poppins(
+                            color: const Color(0xFF32384A),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
 
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 12),
-                              child: InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    _selectedDateIndex = index;
-                                  });
-                                  _loadSlots();
-                                },
+                      // Campo Data (Dropdown/DatePicker)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Data',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: _dark,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFDFDFB),
                                 borderRadius: BorderRadius.circular(12),
-                                child: Container(
-                                  width: 62,
-                                  decoration: BoxDecoration(
-                                    color: isSelected ? _green : const Color(0xFFF9FAFB),
+                              ),
+                              child: DropdownButtonFormField<int>(
+                                value: _selectedDateIndex,
+                                decoration: InputDecoration(
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  isDense: true,
+                                  enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: isSelected ? _green : const Color(0xFFECECEC),
-                                    ),
+                                    borderSide: const BorderSide(color: _green, width: 2),
                                   ),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        dayLabel,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: isSelected ? Colors.white : _lightGray,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        date.day.toString(),
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          color: isSelected ? Colors.white : _dark,
-                                        ),
-                                      ),
-                                    ],
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(color: _green, width: 2),
                                   ),
                                 ),
+                                icon: const Icon(Icons.keyboard_arrow_down, color: _dark),
+                                dropdownColor: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                onChanged: (int? newValue) {
+                                  if (newValue != null && mounted) {
+                                    setState(() {
+                                      _selectedDateIndex = newValue;
+                                    });
+                                    _loadSlots();
+                                  }
+                                },
+                                items: List.generate(_dates.length, (index) {
+                                  final date = _dates[index];
+                                  final formattedDate = DateFormat('dd/MM/yyyy').format(date);
+                                  return DropdownMenuItem<int>(
+                                    value: index,
+                                    child: Text(
+                                      formattedDate,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: _dark,
+                                      ),
+                                    ),
+                                  );
+                                }),
                               ),
-                            );
-                          },
+                            ),
+                          ],
                         ),
                       ),
 
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 24),
 
+                      // Horários Disponíveis
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Text(
                           'Horários disponíveis',
                           style: GoogleFonts.poppins(
-                            fontSize: 15,
+                            fontSize: 14,
                             fontWeight: FontWeight.w700,
                             color: _dark,
                           ),
                         ),
                       ),
 
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 8),
 
-                      // Grid de horários
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: _isLoadingSlots
-                            ? const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator(color: _green)))
-                            : _slots.isEmpty
-                                ? _buildEmptySlotsState()
-                                : GridView.builder(
-                                    shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: 2,
-                                      crossAxisSpacing: 12,
-                                      mainAxisSpacing: 12,
-                                      childAspectRatio: 2.8,
-                                    ),
-                                    itemCount: _slots.length,
-                                    itemBuilder: (context, index) {
-                                      final isSelected = index == _selectedSlotIndex;
-                                      return InkWell(
-                                        onTap: () {
-                                          setState(() {
-                                            _selectedSlotIndex = index;
-                                          });
-                                        },
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: isSelected ? _green : Colors.white,
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(
-                                              color: isSelected ? _green : const Color(0xFFECECEC),
-                                            ),
-                                          ),
-                                          alignment: Alignment.center,
-                                          child: Text(
-                                            _slots[index],
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w600,
-                                              color: isSelected ? Colors.white : _dark,
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                      ),
+                      if (_isLoadingSlots)
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(32),
+                            child: CircularProgressIndicator(color: _green),
+                          ),
+                        )
+                      else if (_slots.isEmpty)
+                        _buildEmptySlotsState()
+                      else ...[
+                        _buildPeriodSection('Manhã', _getSlotsByPeriod('manha')),
+                        _buildPeriodSection('Tarde', _getSlotsByPeriod('tarde')),
+                        _buildPeriodSection('Noite', _getSlotsByPeriod('noite')),
+                      ],
 
                       const SizedBox(height: 32),
                     ],
                   ),
                 ),
 
-                // Botão Continuar → formulário de participantes
+                // Botão Agendar agora
                 Padding(
                   padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).padding.bottom + 16),
                   child: FilledButton(
@@ -295,11 +302,11 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
                       disabledBackgroundColor: _green.withValues(alpha: 0.5),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
                     child: Text(
-                      'Continuar',
+                      'Agendar agora',
                       style: GoogleFonts.poppins(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -335,24 +342,112 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
     );
   }
 
-  String _getDayLabel(DateTime date) {
-    final weekday = date.weekday;
-    switch (weekday) {
-      case DateTime.monday:
-        return 'Seg';
-      case DateTime.tuesday:
-        return 'Ter';
-      case DateTime.wednesday:
-        return 'Qua';
-      case DateTime.thursday:
-        return 'Qui';
-      case DateTime.friday:
-        return 'Sex';
-      case DateTime.saturday:
-        return 'Sáb';
-      case DateTime.sunday:
-        return 'Dom';
-    }
-    return '';
+  Widget _buildPeriodSection(String title, List<String> slots) {
+    if (slots.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: _dark,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: slots.map((slot) {
+              final isAvailable = _slots.contains(slot);
+              final isSelected = _selectedSlotValue == slot;
+              final startHour = slot.split(' - ')[0];
+
+              return InkWell(
+                onTap: isAvailable
+                    ? () {
+                        setState(() {
+                          _selectedSlotValue = slot;
+                        });
+                      }
+                    : null,
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  width: (MediaQuery.of(context).size.width - 48 - 36) / 4,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: isSelected ? _green : Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isSelected
+                          ? _green
+                          : isAvailable
+                              ? _green
+                              : const Color(0xFFECECEC),
+                      width: isAvailable && !isSelected ? 1.5 : 1.0,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    startHour,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected
+                          ? Colors.white
+                          : isAvailable
+                              ? _green
+                              : const Color(0xFFC4C4C4),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
   }
+
+  List<String> _generateAllSlots() {
+    if (_space == null) return [];
+
+    int startHour = 8;
+    int endHour = 18;
+    if (_space!.rule != null) {
+      final openParts = _space!.rule!.openingTime.split(':');
+      final closeParts = _space!.rule!.closingTime.split(':');
+      if (openParts.isNotEmpty) startHour = int.tryParse(openParts[0]) ?? 8;
+      if (closeParts.isNotEmpty) endHour = int.tryParse(closeParts[0]) ?? 18;
+    }
+
+    final List<String> list = [];
+    for (int hour = startHour; hour + 2 <= endHour; hour += 2) {
+      final startStr = '${hour.toString().padLeft(2, '0')}:00';
+      final endStr = '${(hour + 2).toString().padLeft(2, '0')}:00';
+      list.add('$startStr - $endStr');
+    }
+    return list;
+  }
+
+  List<String> _getSlotsByPeriod(String period) {
+    final all = _generateAllSlots();
+    return all.where((slot) {
+      final startHourStr = slot.split(' - ')[0].split(':')[0];
+      final hour = int.tryParse(startHourStr) ?? 0;
+      if (period == 'manha') {
+        return hour < 12;
+      } else if (period == 'tarde') {
+        return hour >= 12 && hour < 18;
+      } else {
+        return hour >= 18;
+      }
+    }).toList();
+  }
+
+
 }

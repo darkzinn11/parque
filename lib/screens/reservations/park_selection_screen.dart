@@ -66,14 +66,14 @@ class _ParkSelectionScreenState extends State<ParkSelectionScreen> {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: _green, size: 18),
+          icon: const Icon(Icons.arrow_back_ios_new, color: _green),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
           'Escolha o parque',
           style: GoogleFonts.poppins(
             color: _green,
-            fontSize: 18,
+            fontSize: 20,
             fontWeight: FontWeight.w700,
           ),
         ),

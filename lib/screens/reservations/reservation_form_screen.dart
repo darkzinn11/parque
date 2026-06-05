@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../data/models/reservation.dart';
 import '../../data/repositories/go_reservation_repository.dart';
-import '../../services/auth_service.dart';
 import '../../widgets/app_toast.dart';
 
 const _green = Color(0xFF669340);
@@ -51,7 +50,6 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
   // Dados derivados
   late final int _spaceId;
   late final String _spaceName;
-  late final String _parkName;
   late final int _capacityMax;
   late final String _data;
   late final String _horaInicio;
@@ -65,7 +63,6 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
       final r = widget.reservation!;
       _spaceId = r.spaceId;
       _spaceName = r.spaceName;
-      _parkName = r.parkName;
       _capacityMax = r.capacityMax;
       _data = r.data;
       _horaInicio = r.horaInicio;
@@ -83,12 +80,18 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
       final d = widget.bookingData ?? const {};
       _spaceId = (d['spaceId'] ?? 0) as int;
       _spaceName = (d['spaceName'] ?? 'Espaço').toString();
-      _parkName = (d['parkName'] ?? '').toString();
       _capacityMax = (d['capacityMax'] ?? 0) as int;
       _data = (d['data'] ?? '').toString();
       _horaInicio = (d['horaInicio'] ?? '').toString();
       _horaFim = (d['horaFim'] ?? '').toString();
       _termsOfUse = (d['termsOfUse'] ?? '').toString();
+
+      // Pre-popula os controladores de participantes de acordo com a quantidade informada
+      final numParticipants = (d['numParticipants'] ?? 1) as int;
+      final count = numParticipants - 1; // o responsável já conta como 1
+      for (int i = 0; i < count; i++) {
+        _participants.add(_ParticipantControllers());
+      }
     }
   }
 
@@ -133,6 +136,10 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
   }
 
   List<Participant>? _collectParticipants() {
+    if (_participants.isEmpty) {
+      AppToast.show(context, 'Adicione ao menos um participante com nome e CPF.', type: ToastType.error);
+      return null;
+    }
     final result = <Participant>[];
     for (final c in _participants) {
       final nome = c.nome.text.trim();
@@ -173,7 +180,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
     setState(() => _isSubmitting = false);
 
     if (result.success) {
-      _showSuccessDialog();
+      _showSuccessScreen();
       return;
     }
 
@@ -190,48 +197,9 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
     }
   }
 
-  void _showSuccessDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Center(child: Icon(Icons.hourglass_top_rounded, color: _green, size: 48)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Solicitação enviada!',
-              style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: _dark),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Sua reserva foi enviada para análise dos gestores do parque. Você será notificado quando for aprovada.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 13, color: _lightGray, height: 1.4),
-            ),
-          ],
-        ),
-        actions: [
-          Center(
-            child: SizedBox(
-              width: 160,
-              child: FilledButton(
-                onPressed: () {
-                  Navigator.of(ctx).pop();
-                  // Volta para a Home.
-                  context.go('/tabs/home');
-                },
-                style: FilledButton.styleFrom(
-                  backgroundColor: _green,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                child: Text('Entendido', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ),
-        ],
-      ),
+  void _showSuccessScreen() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const _SuccessScreen()),
     );
   }
 
@@ -256,9 +224,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final me = AuthService.instance.currentUser ?? {};
-    final responsavelNome = (me['nome'] ?? me['name'] ?? '').toString();
-    final responsavelCpf = (me['cpf'] ?? '').toString();
+    final totalPessoas = _participants.length + 1; // participantes + responsável
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -267,12 +233,12 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: _green, size: 18),
+          icon: const Icon(Icons.arrow_back_ios_new, color: _green),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
-          widget.isEdit ? 'Reenviar reserva' : 'Confirmar reserva',
-          style: GoogleFonts.poppins(color: _green, fontSize: 18, fontWeight: FontWeight.w700),
+          widget.isEdit ? 'Reenviar reserva' : 'Confirmação',
+          style: GoogleFonts.poppins(color: _green, fontSize: 20, fontWeight: FontWeight.w700),
         ),
         centerTitle: true,
       ),
@@ -280,25 +246,60 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
         children: [
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
               children: [
                 if (widget.isEdit) _buildRejectedBanner(),
 
-                // Resumo
-                _buildSummaryCard(),
+                // Nome do espaço
+                Text(
+                  _spaceName,
+                  style: GoogleFonts.poppins(
+                    color: _green,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    height: 1.3,
+                  ),
+                ),
                 const SizedBox(height: 24),
 
-                // Responsável
-                _buildSectionTitle('Responsável'),
-                const SizedBox(height: 8),
-                _buildReadonlyRow(responsavelNome.isEmpty ? 'Você' : responsavelNome, responsavelCpf),
-                const SizedBox(height: 24),
+                // Data
+                Text('Data:', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: _dark)),
+                const SizedBox(height: 4),
+                Text(
+                  _formattedDate(),
+                  style: GoogleFonts.poppins(fontSize: 15, color: _dark),
+                ),
+                const SizedBox(height: 20),
+
+                // Horário
+                Text('Horário:', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: _dark)),
+                const SizedBox(height: 4),
+                Text(
+                  'Das $_horaInicio às $_horaFim horas',
+                  style: GoogleFonts.poppins(fontSize: 15, color: _dark),
+                ),
+                const SizedBox(height: 20),
+
+                // Quantas pessoas
+                Text(
+                  'Quantas pessoas vão participar?',
+                  style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: _dark),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$totalPessoas ${totalPessoas == 1 ? 'pessoa' : 'pessoas'}',
+                  style: GoogleFonts.poppins(fontSize: 15, color: _dark),
+                ),
+                const SizedBox(height: 28),
 
                 // Participantes
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _buildSectionTitle('Participantes'),
+                    Text(
+                      'Participantes',
+                      style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: _dark),
+                    ),
                     TextButton.icon(
                       onPressed: _addParticipant,
                       icon: const Icon(Icons.add, size: 18, color: _green),
@@ -308,10 +309,10 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
                 ),
                 if (_participants.isEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
-                      'Adicione os demais participantes (nome e CPF de cada um).',
-                      style: GoogleFonts.poppins(fontSize: 12.5, color: _lightGray, height: 1.4),
+                      'Obrigatório: adicione ao menos um participante com nome e CPF.',
+                      style: GoogleFonts.poppins(fontSize: 12.5, color: Colors.red.shade400, height: 1.4),
                     ),
                   ),
                 ..._participants.asMap().entries.map((e) => _buildParticipantCard(e.key)),
@@ -320,7 +321,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
                 // Termos (só no modo criação, se houver)
                 if (!widget.isEdit && _termsOfUse.isNotEmpty) ...[
-                  _buildSectionTitle('Termos de uso'),
+                  Text('Termos de uso', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: _dark)),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -353,7 +354,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
             ),
           ),
 
-          // Botão enviar
+          // Botão confirmar
           Padding(
             padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).padding.bottom + 16),
             child: FilledButton(
@@ -361,8 +362,9 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
               style: FilledButton.styleFrom(
                 backgroundColor: _green,
                 disabledBackgroundColor: _green.withValues(alpha: 0.5),
+                minimumSize: const Size(double.infinity, 54),
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               child: _isSubmitting
                   ? const SizedBox(
@@ -434,70 +436,6 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
     );
   }
 
-  Widget _buildSummaryCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFECECEC)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _parkName.isEmpty ? _spaceName : '$_spaceName — $_parkName',
-            style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: _dark),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.calendar_today_outlined, size: 16, color: _green),
-              const SizedBox(width: 8),
-              Text(
-                '${_formattedDate()} · $_horaInicio${_horaFim.isNotEmpty ? ' – $_horaFim' : ''}',
-                style: GoogleFonts.poppins(fontSize: 13, color: _dark, fontWeight: FontWeight.w500),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSectionTitle(String text) {
-    return Text(
-      text,
-      style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: _dark),
-    );
-  }
-
-  Widget _buildReadonlyRow(String nome, String cpf) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFECECEC)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.person_outline, color: _green, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(nome, style: GoogleFonts.poppins(fontSize: 13.5, fontWeight: FontWeight.w600, color: _dark)),
-                if (cpf.isNotEmpty)
-                  Text('CPF: $cpf', style: GoogleFonts.poppins(fontSize: 12, color: _lightGray)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildParticipantCard(int index) {
     final c = _participants[index];
@@ -554,6 +492,87 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       enabledBorder: border,
       focusedBorder: border.copyWith(borderSide: const BorderSide(color: _green)),
+    );
+  }
+}
+
+// ─── Tela de confirmação ──────────────────────────────────────────────────────
+
+class _SuccessScreen extends StatelessWidget {
+  const _SuccessScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Spacer(flex: 2),
+
+              Text(
+                'Agendamento\nem análise!',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  color: _green,
+                  height: 1.2,
+                ),
+              ),
+
+              const SizedBox(height: 40),
+
+              Image.asset(
+                'assets/images/calendario.png',
+                width: 260,
+                fit: BoxFit.contain,
+              ),
+
+              const SizedBox(height: 40),
+
+              Text(
+                'Sua solicitação foi enviada.\nAguarde a aprovação do gestor.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 15,
+                  color: _dark,
+                ),
+              ),
+
+              const Spacer(flex: 2),
+
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => context.go('/tabs/user/minhas-reservas'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _green,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.calendar_today_outlined, size: 18, color: Colors.white),
+                  label: Text(
+                    'Ver meus agendamentos',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

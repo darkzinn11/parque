@@ -88,14 +88,14 @@ class _SpacesCatalogScreenState extends State<SpacesCatalogScreen> {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: _green, size: 18),
+          icon: const Icon(Icons.arrow_back_ios_new, color: _green),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
           'Reserve seu espaço',
           style: GoogleFonts.poppins(
             color: _green,
-            fontSize: 18,
+            fontSize: 20,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -269,7 +269,6 @@ class _SpaceGridCard extends StatefulWidget {
 }
 
 class _SpaceGridCardState extends State<_SpaceGridCard> {
-  bool _isFavorited = false; // Mock local favorite state for space cards
 
   @override
   Widget build(BuildContext context) {
@@ -310,30 +309,6 @@ class _SpaceGridCardState extends State<_SpaceGridCard> {
                               ),
                             )
                           : Container(color: Colors.grey[100]),
-                    ),
-                  ),
-                  Positioned(
-                    right: 8,
-                    top: 8,
-                    child: GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _isFavorited = !_isFavorited;
-                        });
-                      },
-                      child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          _isFavorited ? Icons.favorite : Icons.favorite_border,
-                          color: _isFavorited ? Colors.red : _lightGray,
-                          size: 16,
-                        ),
-                      ),
                     ),
                   ),
                 ],
