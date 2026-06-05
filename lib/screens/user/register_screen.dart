@@ -5,6 +5,7 @@ import '../../core/formatters.dart';
 import '../../services/auth_service.dart';
 import '../../services/cep_service.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/password_strength_indicator.dart';
 
 const kGreen   = Color(0xFF669340);
 const kDark    = Color(0xFF32384A);
@@ -102,13 +103,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _pass    = TextEditingController();
   final _confirm = TextEditingController();
 
-  bool _loading       = false;
-  bool _triedSubmit   = false;
+  bool _loading        = false;
+  bool _triedSubmit    = false;
   bool _obscurePass    = true;
   bool _obscureConfirm = true;
-  bool _accept        = false;
-  bool _loadingCep    = false;
-  int  _cepSeq        = 0;
+  bool _accept         = false;
+  bool _loadingCep     = false;
+  int  _cepSeq         = 0;
+  String _passValue    = '';
   String? _topError;
 
   @override
@@ -193,9 +195,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   String? _valPass(String? v) {
     if (!_triedSubmit) return null;
-    if ((v ?? '').isEmpty) return 'Crie uma senha';
-    if ((v ?? '').length < 8) return 'Mínimo de 8 caracteres';
-    return null;
+    return PasswordRules.validate(v);
   }
 
   String? _valConfirm(String? v) {
@@ -479,6 +479,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     controller: _pass,
                     obscureText: _obscurePass,
                     validator: _valPass,
+                    onChanged: (v) => setState(() => _passValue = v),
                     decoration: _box(
                       hint: 'Mínimo 8 caracteres',
                       suffix: IconButton(
@@ -495,6 +496,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
                 ),
+                PasswordStrengthIndicator(password: _passValue),
                 const SizedBox(height: 16),
 
                 _Labeled(

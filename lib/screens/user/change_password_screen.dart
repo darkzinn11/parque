@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/api/api_client.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/password_strength_indicator.dart';
 
 const _green = Color(0xFF669340);
 const _dark = Color(0xFF32384A);
@@ -25,6 +26,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool _showNova = false;
   bool _showConfirma = false;
   bool _isSaving = false;
+  String _novaValue = '';
   String? _senhaAtualError;
 
   final _api = ApiClient();
@@ -124,7 +126,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Sua nova senha deve ter pelo menos 6 caracteres.',
+                      'Mín. 8 caracteres, com maiúscula, número e caractere especial.',
                       style: GoogleFonts.poppins(
                         fontSize: 13,
                         color: _green,
@@ -175,17 +177,22 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                   controller: _novaCtrl,
                   label: 'Nova senha',
                   show: _showNova,
-                  onToggle: () =>
-                      setState(() => _showNova = !_showNova),
+                  onToggle: () => setState(() => _showNova = !_showNova),
+                  onChanged: (v) => setState(() => _novaValue = v),
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Informe a nova senha';
-                    if (v.length < 6) return 'Mínimo 6 caracteres';
+                    final err = PasswordRules.validate(v);
+                    if (err != null) return err;
                     if (v == _atualCtrl.text) {
                       return 'A nova senha deve ser diferente da atual';
                     }
                     return null;
                   },
                 ),
+                if (_novaValue.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: PasswordStrengthIndicator(password: _novaValue),
+                  ),
                 _Divider(),
                 _PasswordField(
                   controller: _confirmaCtrl,
