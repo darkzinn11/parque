@@ -9,6 +9,8 @@ import 'package:image_picker/image_picker.dart';
 
 import '../core/api/api_client.dart';
 import '../core/api/api_config.dart';
+import '../services/auth_service.dart';
+import '../services/cep_service.dart';
 import '../widgets/app_toast.dart';
 
 const kBrandGreen = Color(0xFF669340);
@@ -81,6 +83,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   TextEditingController? _bairroController;
 
   // Local da denúncia
+  final _cepLocalController = TextEditingController();
   final _cidadeController = TextEditingController();
   final _enderecoDenunciaController = TextEditingController();
   final _pontoReferenciaController = TextEditingController();
@@ -97,6 +100,8 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   bool _informacoesVerdadeiras = false;
 
   bool _enviando = false;
+  bool _loadingCepEndereco = false;
+  bool _loadingCepLocal = false;
 
   static const _categorias = [
     'Infraestrutura',
@@ -119,11 +124,64 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     _numeroController?.dispose();
     _complementoController?.dispose();
     _bairroController?.dispose();
+    _cepLocalController.dispose();
     _cidadeController.dispose();
     _enderecoDenunciaController.dispose();
     _pontoReferenciaController.dispose();
     _descricaoController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _preencherDadosUsuario();
+  }
+
+  void _preencherDadosUsuario() {
+    final user = AuthService.instance.currentUser;
+    if (user == null) return;
+    _emailController.text = user['email']?.toString() ?? '';
+    _nomeController.text = user['nome']?.toString() ?? '';
+    _celularController.text = user['telefone']?.toString() ?? '';
+  }
+
+  // ── CEP ───────────────────────────────────────────────────────────────────────
+
+  Future<void> _onCepEnderecoChanged(String value) async {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 8) return;
+
+    setState(() => _loadingCepEndereco = true);
+    final result = await CepService.fetch(digits);
+    if (!mounted) return;
+    setState(() => _loadingCepEndereco = false);
+
+    if (result == null) {
+      AppToast.show(context, 'CEP não encontrado.', type: ToastType.warning);
+      return;
+    }
+    _ruaController?.text = result.logradouro;
+    _bairroController?.text = result.bairro;
+  }
+
+  Future<void> _onCepLocalChanged(String value) async {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 8) return;
+
+    setState(() => _loadingCepLocal = true);
+    final result = await CepService.fetch(digits);
+    if (!mounted) return;
+    setState(() => _loadingCepLocal = false);
+
+    if (result == null) {
+      AppToast.show(context, 'CEP não encontrado.', type: ToastType.warning);
+      return;
+    }
+    _cidadeController.text = '${result.localidade} - ${result.uf}';
+    if (_enderecoDenunciaController.text.isEmpty) {
+      _enderecoDenunciaController.text = result.logradouro;
+    }
   }
 
   void _toggleEndereco(bool val) {
@@ -439,6 +497,8 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                         controller: _cepController!,
                         type: TextInputType.number,
                         formatters: [_CepFormatter()],
+                        onChanged: _onCepEnderecoChanged,
+                        suffixLoading: _loadingCepEndereco,
                       ),
                       _buildField(hint: 'Rua', controller: _ruaController!),
                       Row(
@@ -475,6 +535,14 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                     _buildSectionHeader(
                         Icons.location_on_outlined, 'Local da denúncia'),
                     const SizedBox(height: 20),
+                    _buildField(
+                      hint: 'CEP do local (opcional)',
+                      controller: _cepLocalController,
+                      type: TextInputType.number,
+                      formatters: [_CepFormatter()],
+                      onChanged: _onCepLocalChanged,
+                      suffixLoading: _loadingCepLocal,
+                    ),
                     _buildField(
                       hint: 'Cidade da denúncia',
                       controller: _cidadeController,
@@ -807,23 +875,41 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     List<TextInputFormatter>? formatters,
     int maxLines = 1,
     String? Function(String?)? validator,
-  }) =>
-      Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        child: TextFormField(
-          controller: controller,
-          keyboardType: type,
-          maxLines: maxLines,
-          inputFormatters: formatters,
-          style: GoogleFonts.poppins(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: kDarkGray,
-          ),
-          decoration: _inputDecoration(hint, icon: icon),
-          validator: validator,
+    ValueChanged<String>? onChanged,
+    bool suffixLoading = false,
+  }) {
+    final decoration = suffixLoading
+        ? _inputDecoration(hint, icon: icon).copyWith(
+            suffixIcon: const Padding(
+              padding: EdgeInsets.all(12),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: kBrandGreen),
+              ),
+            ),
+          )
+        : _inputDecoration(hint, icon: icon);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: type,
+        maxLines: maxLines,
+        inputFormatters: formatters,
+        onChanged: onChanged,
+        style: GoogleFonts.poppins(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: kDarkGray,
         ),
-      );
+        decoration: decoration,
+        validator: validator,
+      ),
+    );
+  }
 
   Widget _buildCheckbox({
     required String text,

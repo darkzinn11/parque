@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/auth_service.dart';
+import '../../services/cep_service.dart';
+import '../../widgets/app_toast.dart';
 
 /// ===== TOKENS =====
 const kGreen   = Color(0xFF669340);
@@ -88,6 +90,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _cpf     = TextEditingController();
   final _email   = TextEditingController();
   final _phone   = TextEditingController();
+  final _cep     = TextEditingController();
+  final _cidade  = TextEditingController();
   final _pass    = TextEditingController();
   final _confirm = TextEditingController();
 
@@ -96,17 +100,43 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePass = true;
   bool _obscureConfirm = true;
   bool _accept = false;
+  bool _loadingCep = false;
   String? _topError;
 
   @override
   void dispose() {
     _scroll.dispose();
     _name.dispose(); _cpf.dispose(); _email.dispose();
-    _phone.dispose(); _pass.dispose(); _confirm.dispose();
+    _phone.dispose(); _cep.dispose(); _cidade.dispose();
+    _pass.dispose(); _confirm.dispose();
     super.dispose();
   }
 
+  Future<void> _onCepChanged(String value) async {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 8) return;
+
+    setState(() => _loadingCep = true);
+    final result = await CepService.fetch(digits);
+    if (!mounted) return;
+    setState(() => _loadingCep = false);
+
+    if (result == null) {
+      AppToast.show(context, 'CEP não encontrado.', type: ToastType.warning);
+      return;
+    }
+    _cidade.text = '${result.localidade} - ${result.uf}';
+    if (_triedSubmit) _form.currentState?.validate();
+  }
+
   // ---------- Validações ----------
+  String? _valCidade(String? v) {
+    if (!_triedSubmit) return null;
+    final t = (v ?? '').trim();
+    if (t.isEmpty) return 'Informe sua cidade / localidade';
+    return null;
+  }
+
   String? _valName(String? v) {
     if (!_triedSubmit) return null;
     final t = (v ?? '').trim();
@@ -184,12 +214,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     if (!valid || !_accept) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Colors.red,
-          content: Text("Corrija os campos em vermelho."),
-        ),
-      );
+      AppToast.show(context, 'Corrija os campos em vermelho.', type: ToastType.error);
       return;
     }
 
@@ -201,6 +226,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       password: _pass.text,
       phone: _phone.text.trim(),
       cpf: _cpf.text.replaceAll(RegExp(r'\D'), ''),
+      cidade: _cidade.text.trim(),
     );
 
     if (!mounted) return;
@@ -259,7 +285,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     padding: const EdgeInsets.all(12),
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(.08),
+                      color: Colors.red.withValues(alpha: .08),
                       border: Border.all(color: Colors.red),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -293,6 +319,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 _Labeled(
                   label: 'Celular',
                   child: TextFormField(controller: _phone, validator: _valPhone, decoration: _box(hint: "DDD + número")),
+                ),
+                const SizedBox(height: 20),
+                _Labeled(
+                  label: 'CEP',
+                  child: TextFormField(
+                    controller: _cep,
+                    keyboardType: TextInputType.number,
+                    onChanged: _onCepChanged,
+                    decoration: _box(
+                      hint: 'Ex: 65000-000',
+                      suffix: _loadingCep
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: kGreen),
+                              ),
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _Labeled(
+                  label: 'Cidade / Localidade',
+                  child: TextFormField(controller: _cidade, validator: _valCidade, decoration: _box(hint: "Preenchida pelo CEP ou manualmente")),
                 ),
                 const SizedBox(height: 20),
                 _Labeled(
