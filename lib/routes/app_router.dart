@@ -42,6 +42,7 @@ import '../screens/reservations/space_detail_screen.dart';
 import '../screens/reservations/booking_calendar_screen.dart';
 import '../screens/reservations/reservation_form_screen.dart';
 import '../screens/reservations/my_reservations_screen.dart';
+import '../screens/notifications_screen.dart';
 import '../data/models/reservation.dart';
 
 abstract class AppRoutes {
@@ -62,6 +63,7 @@ abstract class AppRoutes {
   static const homeInfo       = '/tabs/home/info';
   static const homeFavorites  = '/tabs/home/favorites'; // ✅ Favoritos via Home
   static const homeDenuncie   = '/tabs/home/denuncie';
+  static const homeNotificacoes    = '/tabs/home/notificacoes';
   static const homeReservas        = '/tabs/home/reservas'; // seleção de parque
   static const homeReservasCatalog = '/tabs/home/reservas/parque/:parkId';
   static const homeReservasDetail  = '/tabs/home/reservas/espaco/:id';
@@ -184,6 +186,14 @@ final GoRouter appRouter = GoRouter(
                   pageBuilder: (context, state) => _sharedAxisPage(
                     key: state.pageKey,
                     child: const DenuncieScreen(),
+                  ),
+                ),
+                GoRoute(
+                  path: 'notificacoes',
+                  name: 'home_notificacoes',
+                  pageBuilder: (context, state) => _sharedAxisPage(
+                    key: state.pageKey,
+                    child: const NotificationsScreen(),
                   ),
                 ),
                 GoRoute(

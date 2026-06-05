@@ -17,6 +17,7 @@ import '../data/park_repository.dart';
 import '../data/repositories/map_point_repository.dart';
 import '../data/models/park.dart';
 import '../core/api/api_config.dart';
+import '../providers/notification_provider.dart';
 
 const kBrandGreen = Color(0xFF669340);
 const kDarkGray = Color(0xFF32384A);
@@ -86,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final activities = pointsRaw
         .where((p) => p.categoria == 'divertir')
         .map((p) => _CardItem(
-          id: p.parkId.toString(), // Joga para a tela do parque
+          id: p.id, // ID do espaço — navega para detalhes do ponto
           title: p.nome,
           image: _toImageUrl(p.imagemUrl) ?? '',
           status: null,
@@ -96,7 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final walks = pointsRaw
         .where((p) => p.categoria == 'caminhar')
         .map((p) => _CardItem(
-          id: p.parkId.toString(), // Joga para a tela do parque
+          id: p.id, // ID do espaço — navega para detalhes do ponto
           title: p.nome,
           image: _toImageUrl(p.imagemUrl) ?? '',
           status: null,
@@ -336,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         context.push(AppRoutes.homeInfo),
                                   ),
                                   _QuickAction(
-                                    iconData: Icons.campaign_outlined,
+                                    iconAsset: 'assets/icons/denuncie.svg',
                                     label: 'Denuncie',
                                     color: kBrandGreen,
                                     onTap: () =>
@@ -703,18 +704,47 @@ class _NotificationBell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: const BoxDecoration(
-        color: kFigmaBellBg,
-        shape: BoxShape.circle,
-      ),
-      child: const Icon(
-        Icons.notifications_none_outlined,
-        color: kBrandGreen,
-        size: 24,
-      ),
+    return Consumer<NotificationProvider>(
+      builder: (context, provider, _) {
+        return GestureDetector(
+          onTap: () {
+            provider.markAllRead();
+            context.push('/tabs/home/notificacoes');
+          },
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                  color: kFigmaBellBg,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.notifications_none_outlined,
+                  color: kBrandGreen,
+                  size: 24,
+                ),
+              ),
+              if (provider.hasUnread)
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

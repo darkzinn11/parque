@@ -11,6 +11,10 @@ import 'services/auth_service.dart';
 import 'services/favorites_service.dart';
 import 'services/notification_service.dart';
 
+// Providers
+import 'providers/notification_provider.dart';
+import 'widgets/app_toast.dart';
+
 // Repositórios e Core
 import 'data/park_repository.dart';
 import 'data/reviews_repository.dart';
@@ -32,18 +36,28 @@ Future<void> main() async {
   await AuthService.instance.init();
   await FavoritesService.instance.init();
 
+  final notificationProvider = NotificationProvider();
+  await notificationProvider.init();
+
   // Push notifications (graceful: não quebra se o Firebase ainda não estiver configurado).
-  NotificationService.instance.onDeepLink = (route) {
-    appRouter.go(route);
-  };
+  NotificationService.instance
+    ..notificationProvider = notificationProvider
+    ..onDeepLink = (route) { appRouter.go(route); }
+    ..onForegroundToast = (title, body) {
+      final ctx = rootNavigatorKey.currentContext;
+      if (ctx != null) {
+        AppToast.show(ctx, title, type: ToastType.info);
+      }
+    };
   // Não aguardamos: a inicialização é best-effort e não deve travar o boot.
   unawaited(NotificationService.instance.initialize());
 
-  runApp(const ParquesApp());
+  runApp(ParquesApp(notificationProvider: notificationProvider));
 }
 
 class ParquesApp extends StatelessWidget {
-  const ParquesApp({super.key});
+  const ParquesApp({super.key, required this.notificationProvider});
+  final NotificationProvider notificationProvider;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +67,7 @@ class ParquesApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider.value(value: AuthService.instance),
         ChangeNotifierProvider.value(value: FavoritesService.instance),
+        ChangeNotifierProvider.value(value: notificationProvider),
         Provider<ParkRepository>(
           create: (_) => GoParkRepository(),
         ),
