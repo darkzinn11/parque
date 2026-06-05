@@ -1,12 +1,61 @@
-import 'dart:ui';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+
+import '../core/api/api_client.dart';
+import '../core/api/api_config.dart';
 import '../widgets/app_toast.dart';
 
 const kBrandGreen = Color(0xFF669340);
 const kDarkGray = Color(0xFF32384A);
 const kSubtitleColor = Color(0xFF6B7280);
+
+// ─── Formatadores ─────────────────────────────────────────────────────────────
+
+class _PhoneFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue old, TextEditingValue nv) {
+    final digits = nv.text.replaceAll(RegExp(r'\D'), '');
+    final buf = StringBuffer();
+    for (int i = 0; i < digits.length && i < 11; i++) {
+      if (i == 0) buf.write('(');
+      if (i == 2) buf.write(') ');
+      if (i == 7) buf.write('-');
+      buf.write(digits[i]);
+    }
+    final text = buf.toString();
+    return nv.copyWith(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
+class _CepFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue old, TextEditingValue nv) {
+    final digits = nv.text.replaceAll(RegExp(r'\D'), '');
+    final buf = StringBuffer();
+    for (int i = 0; i < digits.length && i < 8; i++) {
+      if (i == 5) buf.write('-');
+      buf.write(digits[i]);
+    }
+    final text = buf.toString();
+    return nv.copyWith(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
+// ─── Tela ─────────────────────────────────────────────────────────────────────
 
 class DenuncieScreen extends StatefulWidget {
   const DenuncieScreen({super.key});
@@ -16,44 +65,60 @@ class DenuncieScreen extends StatefulWidget {
 }
 
 class _DenuncieScreenState extends State<DenuncieScreen> {
-  // Personal Info Controllers
+  final _formKey = GlobalKey<FormState>();
+
+  // Dados pessoais
   final _emailController = TextEditingController();
   final _nomeController = TextEditingController();
   final _celularController = TextEditingController();
 
-  // Optional Address Controller
+  // Endereço do denunciante (lazy — criados ao ativar o switch)
   bool _informarEndereco = false;
-  final _cepController = TextEditingController();
-  final _ruaController = TextEditingController();
-  final _numeroController = TextEditingController();
-  final _complementoController = TextEditingController();
-  final _bairroController = TextEditingController();
+  TextEditingController? _cepController;
+  TextEditingController? _ruaController;
+  TextEditingController? _numeroController;
+  TextEditingController? _complementoController;
+  TextEditingController? _bairroController;
 
-  // Report Location Controllers
+  // Local da denúncia
   final _cidadeController = TextEditingController();
   final _enderecoDenunciaController = TextEditingController();
   final _pontoReferenciaController = TextEditingController();
 
-  // Report Detail Controllers
-  String _categoriaSelecionada = 'Infraestrutura';
+  // Detalhes
+  String _categoria = 'Infraestrutura';
   final _descricaoController = TextEditingController();
 
-  // Termos e confirmação
+  // Fotos
+  final List<XFile> _fotosLocais = [];
+
+  // Termos
   bool _concordoTermos = false;
   bool _informacoesVerdadeiras = false;
 
   bool _enviando = false;
+
+  static const _categorias = [
+    'Infraestrutura',
+    'Vandalismo',
+    'Descarte irregular',
+    'Segurança',
+    'Acessibilidade',
+    'Animais',
+    'Iluminação',
+    'Outros',
+  ];
 
   @override
   void dispose() {
     _emailController.dispose();
     _nomeController.dispose();
     _celularController.dispose();
-    _cepController.dispose();
-    _ruaController.dispose();
-    _numeroController.dispose();
-    _complementoController.dispose();
-    _bairroController.dispose();
+    _cepController?.dispose();
+    _ruaController?.dispose();
+    _numeroController?.dispose();
+    _complementoController?.dispose();
+    _bairroController?.dispose();
     _cidadeController.dispose();
     _enderecoDenunciaController.dispose();
     _pontoReferenciaController.dispose();
@@ -61,464 +126,427 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     super.dispose();
   }
 
-  Widget _buildField({
-    required String hintText,
-    required TextEditingController controller,
-    IconData? icon,
-    TextInputType keyboardType = TextInputType.text,
-    int maxLines = 1,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        style: GoogleFonts.poppins(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          color: kDarkGray,
-        ),
-        decoration: InputDecoration(
-          hintText: hintText,
-          hintStyle: GoogleFonts.poppins(
-            fontSize: 14,
-            fontWeight: FontWeight.w400,
-            color: const Color(0xFF9CA3AF),
-          ),
-          prefixIcon: icon != null
-              ? Padding(
-                  padding: const EdgeInsets.only(left: 14, right: 10),
-                  child: Icon(
-                    icon,
-                    color: kBrandGreen.withValues(alpha: 0.8),
-                    size: 20,
-                  ),
-                )
-              : null,
-          filled: true,
-          fillColor: const Color(0xFFFAFBF0),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 14,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF669340), width: 1.2),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF669340), width: 1.2),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF669340), width: 2.0),
-          ),
-        ),
-      ),
-    );
+  void _toggleEndereco(bool val) {
+    if (val && _cepController == null) {
+      _cepController = TextEditingController();
+      _ruaController = TextEditingController();
+      _numeroController = TextEditingController();
+      _complementoController = TextEditingController();
+      _bairroController = TextEditingController();
+    }
+    setState(() => _informarEndereco = val);
   }
 
-  Widget _buildCard({required Widget child}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 20),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFF3F4F6), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF000000).withValues(alpha: 0.04),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: child,
-    );
+  // ── Upload de fotos ──────────────────────────────────────────────────────────
+
+  Future<void> _pickFotos() async {
+    final picked = await ImagePicker().pickMultiImage(imageQuality: 75);
+    if (picked.isEmpty) return;
+    setState(() => _fotosLocais.addAll(picked));
   }
 
-  Widget _buildSectionHeader({required IconData icon, required String title}) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          color: kBrandGreen,
-          size: 20,
-        ),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: GoogleFonts.poppins(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: kDarkGray,
-          ),
-        ),
-      ],
-    );
+  Future<String?> _uploadFoto(XFile foto) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/denuncias/upload');
+    final req = http.MultipartRequest('POST', uri)
+      ..files.add(await http.MultipartFile.fromPath('file', foto.path));
+    final streamed = await req.send();
+    if (streamed.statusCode != 200) return null;
+    final body = await streamed.stream.bytesToString();
+    final data = jsonDecode(body) as Map<String, dynamic>;
+    final relUrl = data['url']?.toString();
+    if (relUrl == null) return null;
+    // relUrl is like /api/v1/uploads/filename.jpg
+    return '${ApiConfig.baseUrl.replaceFirst('/api/v1', '')}$relUrl';
   }
 
-  Future<void> _submitDenuncia() async {
-    // Basic Form Validation
-    if (_emailController.text.trim().isEmpty ||
-        _nomeController.text.trim().isEmpty ||
-        _celularController.text.trim().isEmpty) {
-      AppToast.show(context, 'Por favor, preencha os seus dados pessoais.', type: ToastType.warning);
-      return;
-    }
+  // ── Submit ───────────────────────────────────────────────────────────────────
 
-    if (_cidadeController.text.trim().isEmpty ||
-        _enderecoDenunciaController.text.trim().isEmpty) {
-      AppToast.show(context, 'Por favor, informe a cidade e o endereço do local da denúncia.', type: ToastType.warning);
-      return;
-    }
-
-    if (_descricaoController.text.trim().isEmpty) {
-      AppToast.show(context, 'Por favor, descreva detalhadamente o problema.', type: ToastType.warning);
-      return;
-    }
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
 
     if (!_concordoTermos || !_informacoesVerdadeiras) {
-      AppToast.show(context, 'Você precisa aceitar os termos e confirmar a veracidade das informações.', type: ToastType.warning);
+      AppToast.show(
+        context,
+        'Aceite os termos e confirme a veracidade das informações.',
+        type: ToastType.warning,
+      );
       return;
     }
 
     setState(() => _enviando = true);
 
-    // Simulate API network request
-    await Future.delayed(const Duration(milliseconds: 1500));
+    try {
+      // Upload fotos primeiro
+      final fotosUrls = <String>[];
+      for (final foto in _fotosLocais) {
+        final url = await _uploadFoto(foto);
+        if (url != null) fotosUrls.add(url);
+      }
 
-    if (!mounted) return;
-    setState(() => _enviando = false);
+      final body = <String, dynamic>{
+        'email': _emailController.text.trim(),
+        'nome': _nomeController.text.trim(),
+        'celular': _celularController.text.trim(),
+        'cidade_denuncia': _cidadeController.text.trim(),
+        'endereco_denuncia': _enderecoDenunciaController.text.trim(),
+        'ponto_referencia': _pontoReferenciaController.text.trim(),
+        'categoria': _categoria,
+        'descricao': _descricaoController.text.trim(),
+        'fotos': fotosUrls,
+      };
 
-    // Show beautiful Figma success dialog
-    _mostrarDialogoSucessoDenuncia(_categoriaSelecionada);
+      if (_informarEndereco) {
+        body['cep'] = _cepController?.text.trim() ?? '';
+        body['rua'] = _ruaController?.text.trim() ?? '';
+        body['numero'] = _numeroController?.text.trim() ?? '';
+        body['complemento'] = _complementoController?.text.trim() ?? '';
+        body['bairro'] = _bairroController?.text.trim() ?? '';
+      }
+
+      final response = await ApiClient().post('denuncias', body: body);
+
+      if (!mounted) return;
+
+      if (response.statusCode == 201) {
+        _mostrarDialogoSucesso(context);
+      } else {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        AppToast.show(
+          context,
+          data['error']?.toString() ?? 'Erro ao enviar denúncia.',
+          type: ToastType.error,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.show(context, 'Falha de conexão. Tente novamente.', type: ToastType.error);
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
   }
 
-  void _mostrarDialogoSucessoDenuncia(String categoria) {
+  void _mostrarDialogoSucesso(BuildContext outerContext) {
     showDialog(
-      context: context,
+      context: outerContext,
       barrierDismissible: false,
-      builder: (context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF0FDF4),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.check_circle_outline_rounded,
-                    color: Color(0xFF16A34A),
-                    size: 48,
-                  ),
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF0FDF4),
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  'Obrigado pelo seu relato!',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: kDarkGray,
-                  ),
+                child: const Icon(
+                  Icons.check_circle_outline_rounded,
+                  color: Color(0xFF16A34A),
+                  size: 48,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Sua denúncia de $categoria foi registrada com sucesso e nossa equipe já foi notificada para tomar as devidas providências.',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    color: kDarkGray.withValues(alpha: 0.7),
-                    height: 1.4,
-                  ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Obrigado pelo seu relato!',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: kDarkGray,
                 ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kBrandGreen,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      elevation: 0,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sua denúncia de $_categoria foi registrada com sucesso e nossa equipe já foi notificada.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: kDarkGray.withValues(alpha: 0.7),
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kBrandGreen,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24),
                     ),
-                    onPressed: () {
-                      Navigator.pop(context); // Closes Success Dialog
-                      context.pop(); // Returns to Home Screen
-                    },
-                    child: Text(
-                      'Entendido',
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
+                    elevation: 0,
+                  ),
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    outerContext.pop();
+                  },
+                  child: Text(
+                    'Entendido',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
+
+  // ── Build ────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      body: SafeArea(
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: kBrandGreen),
+          onPressed: () => context.pop(),
+        ),
+        title: Text(
+          'Faça sua denúncia',
+          style: GoogleFonts.poppins(
+            color: kBrandGreen,
+            fontWeight: FontWeight.w700,
+            fontSize: 20,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: Form(
+        key: _formKey,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(vertical: 16.0),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Header Row with back arrow
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Stack(
-                  alignment: Alignment.center,
+              Text(
+                'Informe os dados abaixo para registrar sua denúncia.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: kSubtitleColor,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // 1. Dados pessoais
+              _buildCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: GestureDetector(
-                        onTap: () => context.pop(),
-                        behavior: HitTestBehavior.opaque,
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
-                          child: Icon(
-                            Icons.arrow_back_ios_new,
-                            color: kBrandGreen,
-                          ),
-                        ),
-                      ),
+                    _buildSectionHeader(Icons.person_outline, 'Dados pessoais'),
+                    const SizedBox(height: 20),
+                    _buildField(
+                      hint: 'E-mail',
+                      controller: _emailController,
+                      icon: Icons.mail_outlined,
+                      type: TextInputType.emailAddress,
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Informe o e-mail';
+                        final valid = RegExp(
+                          r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+                        ).hasMatch(v.trim());
+                        return valid ? null : 'E-mail inválido';
+                      },
                     ),
-                    Text(
-                      'Faça sua denúncia',
-                      style: GoogleFonts.poppins(
-                        color: kBrandGreen,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 20,
-                        height: 1.5,
-                      ),
+                    _buildField(
+                      hint: 'Nome completo',
+                      controller: _nomeController,
+                      icon: Icons.person_outline,
+                      validator: (v) =>
+                          v == null || v.trim().isEmpty ? 'Informe o nome' : null,
+                    ),
+                    _buildField(
+                      hint: 'Celular',
+                      controller: _celularController,
+                      icon: Icons.phone_outlined,
+                      type: TextInputType.phone,
+                      formatters: [_PhoneFormatter()],
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Informe o celular';
+                        final digits = v.replaceAll(RegExp(r'\D'), '');
+                        return digits.length < 10 ? 'Celular inválido' : null;
+                      },
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 24.0),
-              // Centered Subtitle
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Text(
-                  'Informe os dados abaixo para registrar sua denúncia.',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w400,
-                    color: kSubtitleColor,
-                    height: 1.428,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24.0),
-              // Main Form Cards and Button
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+
+              // 2. Endereço (opcional)
+              _buildCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // 1. Dados Pessoais Card
-                    _buildCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildSectionHeader(
-                            icon: Icons.person_outline,
-                            title: 'Dados pessoais',
-                          ),
-                          const SizedBox(height: 20),
-                          _buildField(
-                            hintText: 'E-mail',
-                            controller: _emailController,
-                            icon: Icons.mail_outlined,
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          _buildField(
-                            hintText: 'Nome completo',
-                            controller: _nomeController,
-                            icon: Icons.person_outline,
-                          ),
-                          _buildField(
-                            hintText: 'Celular',
-                            controller: _celularController,
-                            icon: Icons.phone_outlined,
-                            keyboardType: TextInputType.phone,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // 2. Informar Meu Endereço Card
-                    _buildCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Informar meu endereço',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                        color: kDarkGray,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Opcional. Selecione para informar.',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w400,
-                                        color: const Color(0xFF9CA3AF),
-                                      ),
-                                    ),
-                                  ],
+                              Text(
+                                'Informar meu endereço',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: kDarkGray,
                                 ),
                               ),
-                              Switch.adaptive(
-                                value: _informarEndereco,
-                                activeColor: Colors.white,
-                                activeTrackColor: kBrandGreen,
-                                inactiveThumbColor: Colors.white,
-                                inactiveTrackColor: const Color(0xFFE5E7EB),
-                                onChanged: (val) {
-                                  setState(() {
-                                    _informarEndereco = val;
-                                  });
-                                },
+                              const SizedBox(height: 2),
+                              Text(
+                                'Opcional. Selecione para informar.',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: const Color(0xFF9CA3AF),
+                                ),
                               ),
                             ],
                           ),
-                          if (_informarEndereco) ...[
-                            const SizedBox(height: 20),
-                            _buildField(
-                              hintText: 'CEP',
-                              controller: _cepController,
-                              keyboardType: TextInputType.number,
-                            ),
-                            _buildField(
-                              hintText: 'Rua',
-                              controller: _ruaController,
-                            ),
-                            Row(
-                              children: [
-                                Expanded(
-                                  flex: 35,
-                                  child: _buildField(
-                                    hintText: 'Número',
-                                    controller: _numeroController,
-                                    keyboardType: TextInputType.number,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  flex: 65,
-                                  child: _buildField(
-                                    hintText: 'Complemento',
-                                    controller: _complementoController,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            _buildField(
-                              hintText: 'Bairro',
-                              controller: _bairroController,
-                            ),
-                          ],
-                        ],
-                      ),
+                        ),
+                        Switch.adaptive(
+                          value: _informarEndereco,
+                          thumbColor: WidgetStateProperty.all(Colors.white),
+                          trackColor: WidgetStateProperty.resolveWith((states) =>
+                              states.contains(WidgetState.selected)
+                                  ? kBrandGreen
+                                  : const Color(0xFFE5E7EB)),
+                          onChanged: _toggleEndereco,
+                        ),
+                      ],
                     ),
-
-                    // 3. Local da Denúncia Card
-                    _buildCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                    if (_informarEndereco) ...[
+                      const SizedBox(height: 20),
+                      _buildField(
+                        hint: 'CEP',
+                        controller: _cepController!,
+                        type: TextInputType.number,
+                        formatters: [_CepFormatter()],
+                      ),
+                      _buildField(hint: 'Rua', controller: _ruaController!),
+                      Row(
                         children: [
-                          _buildSectionHeader(
-                            icon: Icons.location_on_outlined,
-                            title: 'Local da denúncia',
+                          Expanded(
+                            flex: 35,
+                            child: _buildField(
+                              hint: 'Número',
+                              controller: _numeroController!,
+                              type: TextInputType.number,
+                            ),
                           ),
-                          const SizedBox(height: 20),
-                          _buildField(
-                            hintText: 'Cidade da denúncia',
-                            controller: _cidadeController,
-                          ),
-                          _buildField(
-                            hintText: 'Endereço da denúncia',
-                            controller: _enderecoDenunciaController,
-                          ),
-                          _buildField(
-                            hintText: 'Ponto de referência',
-                            controller: _pontoReferenciaController,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 65,
+                            child: _buildField(
+                              hint: 'Complemento',
+                              controller: _complementoController!,
+                            ),
                           ),
                         ],
                       ),
+                      _buildField(hint: 'Bairro', controller: _bairroController!),
+                    ],
+                  ],
+                ),
+              ),
+
+              // 3. Local da denúncia
+              _buildCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildSectionHeader(
+                        Icons.location_on_outlined, 'Local da denúncia'),
+                    const SizedBox(height: 20),
+                    _buildField(
+                      hint: 'Cidade da denúncia',
+                      controller: _cidadeController,
+                      validator: (v) =>
+                          v == null || v.trim().isEmpty ? 'Informe a cidade' : null,
+                    ),
+                    _buildField(
+                      hint: 'Endereço da denúncia',
+                      controller: _enderecoDenunciaController,
+                      validator: (v) =>
+                          v == null || v.trim().isEmpty ? 'Informe o endereço' : null,
+                    ),
+                    _buildField(
+                      hint: 'Ponto de referência (opcional)',
+                      controller: _pontoReferenciaController,
+                    ),
+                  ],
+                ),
+              ),
+
+              // 4. Detalhes
+              _buildCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildSectionHeader(
+                        Icons.assignment_outlined, 'Detalhes e anexos'),
+                    const SizedBox(height: 20),
+
+                    // Categoria
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: DropdownButtonFormField<String>(
+                        value: _categoria,
+                        decoration: _inputDecoration('Categoria'),
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: kDarkGray,
+                        ),
+                        dropdownColor: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        items: _categorias
+                            .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                            .toList(),
+                        onChanged: (v) => setState(() => _categoria = v!),
+                        validator: (v) => v == null ? 'Selecione uma categoria' : null,
+                      ),
                     ),
 
-                    // 4. Detalhes e anexos Card
-                    _buildCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildSectionHeader(
-                            icon: Icons.assignment_outlined,
-                            title: 'Detalhes e anexos',
-                          ),
-                          const SizedBox(height: 20),
-                          _buildField(
-                            hintText: 'Descreva a denúncia aqui...',
-                            controller: _descricaoController,
-                            maxLines: 4,
-                          ),
-                          const SizedBox(height: 16),
-                          CustomPaint(
-                            painter: DashedRectPainter(),
-                            child: InkWell(
-                              onTap: () {
-                                // Ação de simular anexar foto
-                                AppToast.show(context, 'Simulando upload de foto...', type: ToastType.info);
-                              },
-                              borderRadius: BorderRadius.circular(16),
-                              child: Container(
+                    // Descrição
+                    _buildField(
+                      hint: 'Descreva a denúncia aqui...',
+                      controller: _descricaoController,
+                      maxLines: 4,
+                      validator: (v) =>
+                          v == null || v.trim().isEmpty ? 'Descreva o problema' : null,
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    // Área de fotos
+                    CustomPaint(
+                      painter: const DashedRectPainter(),
+                      child: InkWell(
+                        onTap: _pickFotos,
+                        borderRadius: BorderRadius.circular(16),
+                        child: _fotosLocais.isEmpty
+                            ? Container(
                                 height: 110,
                                 alignment: Alignment.center,
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    const Icon(
-                                      Icons.add_a_photo_outlined,
-                                      color: kBrandGreen,
-                                      size: 36,
-                                    ),
+                                    const Icon(Icons.add_a_photo_outlined,
+                                        color: kBrandGreen, size: 36),
                                     const SizedBox(height: 8),
                                     Text(
                                       'Anexar fotos',
@@ -530,92 +558,157 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                                     ),
                                   ],
                                 ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Tamanho máximo por arquivo: 25 MB.',
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w400,
-                              color: const Color(0xFF9CA3AF),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // 5. Confirmação Card
-                    _buildCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildSectionHeader(
-                            icon: Icons.check_circle_outline_rounded,
-                            title: 'Confirmação',
-                          ),
-                          const SizedBox(height: 20),
-                          _buildCheckboxRow(
-                            text: 'Concordo com os termos e condições.',
-                            value: _concordoTermos,
-                            onChanged: (val) {
-                              setState(() {
-                                _concordoTermos = val;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 4),
-                          _buildCheckboxRow(
-                            text: 'Afirmo que as informações aqui prestadas são verdadeiras.',
-                            value: _informacoesVerdadeiras,
-                            onChanged: (val) {
-                              setState(() {
-                                _informacoesVerdadeiras = val;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // Submit Button
-                    SizedBox(
-                      height: 52,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kBrandGreen,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(26),
-                          ),
-                          elevation: 0,
-                        ),
-                        onPressed: _enviando ? null : _submitDenuncia,
-                        child: _enviando
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
                               )
-                            : Text(
-                                'Enviar ocorrência',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white,
+                            : Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  children: [
+                                    SizedBox(
+                                      height: 80,
+                                      child: ListView.separated(
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: _fotosLocais.length + 1,
+                                        separatorBuilder: (_, __) =>
+                                            const SizedBox(width: 8),
+                                        itemBuilder: (_, i) {
+                                          if (i == _fotosLocais.length) {
+                                            return GestureDetector(
+                                              onTap: _pickFotos,
+                                              child: Container(
+                                                width: 80,
+                                                decoration: BoxDecoration(
+                                                  border: Border.all(
+                                                      color: kBrandGreen,
+                                                      width: 1.5),
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                ),
+                                                child: const Icon(
+                                                    Icons.add_photo_alternate_outlined,
+                                                    color: kBrandGreen),
+                                              ),
+                                            );
+                                          }
+                                          return Stack(
+                                            children: [
+                                              ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                child: Image.network(
+                                                  _fotosLocais[i].path,
+                                                  width: 80,
+                                                  height: 80,
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (_, __, ___) =>
+                                                      Container(
+                                                    width: 80,
+                                                    height: 80,
+                                                    color: const Color(0xFFF5F7EB),
+                                                    child: const Icon(
+                                                        Icons.image_outlined,
+                                                        color: kBrandGreen),
+                                                  ),
+                                                ),
+                                              ),
+                                              Positioned(
+                                                top: 4,
+                                                right: 4,
+                                                child: GestureDetector(
+                                                  onTap: () => setState(
+                                                      () => _fotosLocais.removeAt(i)),
+                                                  child: Container(
+                                                    width: 20,
+                                                    height: 20,
+                                                    decoration: const BoxDecoration(
+                                                      color: Colors.red,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                    child: const Icon(Icons.close,
+                                                        color: Colors.white, size: 13),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      '${_fotosLocais.length} foto${_fotosLocais.length != 1 ? 's' : ''} selecionada${_fotosLocais.length != 1 ? 's' : ''}',
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 12, color: kBrandGreen),
+                                    ),
+                                  ],
                                 ),
                               ),
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Tamanho máximo por arquivo: 5 MB.',
+                      style: GoogleFonts.poppins(
+                          fontSize: 11, color: const Color(0xFF9CA3AF)),
+                    ),
                   ],
                 ),
               ),
+
+              // 5. Confirmação
+              _buildCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildSectionHeader(
+                        Icons.check_circle_outline_rounded, 'Confirmação'),
+                    const SizedBox(height: 20),
+                    _buildCheckbox(
+                      text: 'Concordo com os termos e condições.',
+                      value: _concordoTermos,
+                      onChanged: (v) => setState(() => _concordoTermos = v),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildCheckbox(
+                      text: 'Afirmo que as informações aqui prestadas são verdadeiras.',
+                      value: _informacoesVerdadeiras,
+                      onChanged: (v) => setState(() => _informacoesVerdadeiras = v),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              SizedBox(
+                height: 52,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kBrandGreen,
+                    disabledBackgroundColor: kBrandGreen.withValues(alpha: 0.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(26),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: _enviando ? null : _submit,
+                  child: _enviando
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2),
+                        )
+                      : Text(
+                          'Enviar ocorrência',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 32),
             ],
           ),
         ),
@@ -623,57 +716,156 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     );
   }
 
-  Widget _buildCheckboxRow({
-    required String text,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: kBrandGreen,
-                  width: 2.0,
-                ),
-                color: value ? kBrandGreen : Colors.transparent,
-              ),
-              child: value
-                  ? const Icon(
-                      Icons.check,
-                      color: Colors.white,
-                      size: 14,
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                text,
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: kDarkGray,
-                  height: 1.3,
-                ),
-              ),
+  // ── Helpers de layout ────────────────────────────────────────────────────────
+
+  Widget _buildCard({required Widget child}) => Container(
+        margin: const EdgeInsets.only(bottom: 20),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0xFFF3F4F6)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF000000).withValues(alpha: 0.04),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
-      ),
-    );
-  }
+        child: child,
+      );
+
+  Widget _buildSectionHeader(IconData icon, String title) => Row(
+        children: [
+          Icon(icon, color: kBrandGreen, size: 20),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: kDarkGray,
+            ),
+          ),
+        ],
+      );
+
+  InputDecoration _inputDecoration(String hint, {IconData? icon}) =>
+      InputDecoration(
+        hintText: hint,
+        hintStyle: GoogleFonts.poppins(
+          fontSize: 14,
+          color: const Color(0xFF9CA3AF),
+        ),
+        prefixIcon: icon != null
+            ? Padding(
+                padding: const EdgeInsets.only(left: 14, right: 10),
+                child: Icon(icon,
+                    color: kBrandGreen.withValues(alpha: 0.8), size: 20),
+              )
+            : null,
+        filled: true,
+        fillColor: const Color(0xFFFAFBF0),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide:
+              const BorderSide(color: Color(0xFF669340), width: 1.2),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide:
+              const BorderSide(color: Color(0xFF669340), width: 1.2),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide:
+              const BorderSide(color: Color(0xFF669340), width: 2.0),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide:
+              const BorderSide(color: Colors.red, width: 1.2),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.red, width: 2),
+        ),
+      );
+
+  Widget _buildField({
+    required String hint,
+    required TextEditingController controller,
+    IconData? icon,
+    TextInputType type = TextInputType.text,
+    List<TextInputFormatter>? formatters,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) =>
+      Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: TextFormField(
+          controller: controller,
+          keyboardType: type,
+          maxLines: maxLines,
+          inputFormatters: formatters,
+          style: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: kDarkGray,
+          ),
+          decoration: _inputDecoration(hint, icon: icon),
+          validator: validator,
+        ),
+      );
+
+  Widget _buildCheckbox({
+    required String text,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) =>
+      GestureDetector(
+        onTap: () => onChanged(!value),
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: kBrandGreen, width: 2),
+                  color: value ? kBrandGreen : Colors.transparent,
+                ),
+                child: value
+                    ? const Icon(Icons.check, color: Colors.white, size: 14)
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  text,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: kDarkGray,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 }
+
+// ─── DashedRectPainter ────────────────────────────────────────────────────────
 
 class DashedRectPainter extends CustomPainter {
   final Color color;
@@ -682,7 +874,7 @@ class DashedRectPainter extends CustomPainter {
   final double dashLength;
   final double borderRadius;
 
-  DashedRectPainter({
+  const DashedRectPainter({
     this.color = kBrandGreen,
     this.strokeWidth = 1.2,
     this.gap = 4.0,
@@ -703,17 +895,16 @@ class DashedRectPainter extends CustomPainter {
         Radius.circular(borderRadius),
       ));
 
-    final dashPath = _buildDashedPath(path, dashLength, gap);
-    canvas.drawPath(dashPath, paint);
+    canvas.drawPath(_dashedPath(path), paint);
   }
 
-  Path _buildDashedPath(Path source, double dashLength, double gap) {
-    final Path dest = Path();
-    for (final PathMetric metric in source.computeMetrics()) {
-      double distance = 0.0;
+  Path _dashedPath(Path source) {
+    final dest = Path();
+    for (final metric in source.computeMetrics()) {
+      double distance = 0;
       bool draw = true;
       while (distance < metric.length) {
-        final double len = draw ? dashLength : gap;
+        final len = draw ? dashLength : gap;
         if (draw) {
           dest.addPath(
             metric.extractPath(distance, distance + len),
@@ -728,5 +919,10 @@ class DashedRectPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant DashedRectPainter old) =>
+      old.color != color ||
+      old.strokeWidth != strokeWidth ||
+      old.gap != gap ||
+      old.dashLength != dashLength ||
+      old.borderRadius != borderRadius;
 }
