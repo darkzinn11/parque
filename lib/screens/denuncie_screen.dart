@@ -140,7 +140,11 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   // ── Upload de fotos ──────────────────────────────────────────────────────────
 
   Future<void> _pickFotos() async {
-    final picked = await ImagePicker().pickMultiImage(imageQuality: 75);
+    final picked = await ImagePicker().pickMultiImage(
+      imageQuality: 75,
+      maxWidth: 1280,
+      maxHeight: 1280,
+    );
     if (picked.isEmpty) return;
     setState(() => _fotosLocais.addAll(picked));
   }
