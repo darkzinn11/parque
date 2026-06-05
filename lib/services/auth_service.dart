@@ -1,71 +1,105 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' as http;
-
-/// Endereço da API do Strapi (ajuste para seu servidor/domínio real)
-const String kApiBase = 'http://192.168.15.12:1337/api';
+import '../core/api/api_client.dart';
 
 class AuthService extends ChangeNotifier {
-  // ---------- SINGLETON ----------
   static final AuthService instance = AuthService._();
   AuthService._();
 
-  // ---------- STORAGE ----------
+  final _api = ApiClient();
+
+  // STORAGE
   static const _storage = FlutterSecureStorage();
-  static const _tokenKey = 'strapi_jwt_token';
+  static const _tokenKey = 'park_jwt_token'; // Alterado para evitar conflito com o antigo
 
   String? _tokenCache;
   Map<String, dynamic>? _userCache;
 
-  // ---------- INIT ----------
+  // ======================================================
+  // INIT
+  // ======================================================
   Future<void> init() async {
     _tokenCache = await _storage.read(key: _tokenKey);
     if (_tokenCache != null) {
-      _userCache = await me();
+      await refreshUser();
     }
     notifyListeners();
   }
 
+  // GETTERS
   String? get tokenSync => _tokenCache;
   Map<String, dynamic>? get currentUser => _userCache;
   String? get userId => _userCache?['id']?.toString();
 
-  // ---------- LOGIN ----------
+  // ======================================================
+  // LOGIN (Contrato Go)
+  // ======================================================
   Future<bool> login(String email, String password) async {
     try {
-      final res = await http.post(
-        Uri.parse('$kApiBase/auth/local'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'identifier': email, // Strapi aceita email ou username
-          'password': password,
-        }),
-      );
+      final res = await _api.post('/login', body: {
+        'email': email,
+        'senha': password,
+      });
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        final token = data['jwt'];
-        if (token is String && token.isNotEmpty) {
+        final token = data['token'];
+        final user = data['usuario'];
+
+        if (token != null) {
           _tokenCache = token;
           await _storage.write(key: _tokenKey, value: token);
-          _userCache = data['user'];
+          if (user != null) _userCache = user;
+
           notifyListeners();
           return true;
         }
       }
 
       if (kDebugMode) {
-        print('❌ Falha login: ${res.statusCode} -> ${res.body}');
+        print("❌ Login falhou: ${res.statusCode} -> ${res.body}");
       }
       return false;
+
     } catch (e) {
-      if (kDebugMode) print('❌ Erro de rede no login: $e');
+      if (kDebugMode) print("❌ Erro login: $e");
       return false;
     }
   }
 
-  // ---------- LOGOUT ----------
+  // ======================================================
+  // ME / REFRESH USER (Contrato Go)
+  // ======================================================
+  Future<Map<String, dynamic>?> me() async {
+    if (_tokenCache == null) return null;
+    try {
+      final res = await _api.get('/me');
+
+      if (res.statusCode == 200) {
+        final user = jsonDecode(res.body);
+        _userCache = user;
+        notifyListeners();
+        return user;
+      }
+
+      // Token expirado ou inválido — limpa sessão localmente
+      if (res.statusCode == 401) {
+        await logout();
+      }
+    } catch (e) {
+      if (kDebugMode) print("❌ Erro /me: $e");
+    }
+    return null;
+  }
+  
+  Future<void> refreshUser() async {
+    await me();
+  }
+
+  // ======================================================
+  // LOGOUT
+  // ======================================================
   Future<void> logout() async {
     _tokenCache = null;
     _userCache = null;
@@ -73,150 +107,79 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ---------- TOKEN ----------
   Future<String?> token() async {
     _tokenCache ??= await _storage.read(key: _tokenKey);
     return _tokenCache;
   }
 
-  // ---------- ME ----------
-  Future<Map<String, dynamic>?> me() async {
-    final t = await token();
-    if (t == null) return null;
-    try {
-      final res = await http.get(
-        Uri.parse('$kApiBase/users/me?populate=avatar'),
-        headers: {'Authorization': 'Bearer $t'},
-      );
-
-      if (res.statusCode == 200) {
-        final user = jsonDecode(res.body);
-        _userCache = user;
-        if (kDebugMode) print('🔑 Usuario logado: $user');
-        return user;
-      }
-    } catch (e) {
-      if (kDebugMode) print('❌ Erro ao buscar /users/me: $e');
-    }
-    return null;
-  }
-
   Future<bool> isLogged() async => (await token()) != null;
 
-  // ---------- SIGNUP (2 passos: register + update) ----------
+  // ======================================================
+  // SIGNUP (Contrato Go)
+  // ======================================================
   Future<dynamic> signup({
     required String username,
     required String email,
     required String password,
     String? phone,
     String? cpf,
+    String? cidade,
   }) async {
     try {
-      // 1) cria usuário
-      final res = await http.post(
-        Uri.parse('$kApiBase/auth/local/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'username': username,
-          'email': email,
-          'password': password,
-        }),
-      );
+      final res = await _api.post('/register', body: {
+        'nome': username,
+        'email': email,
+        'senha': password,
+        if (phone != null) 'telefone': phone,
+        if (cpf != null) 'cpf': cpf,
+        if (cidade != null) 'cidade': cidade,
+      });
 
-      if (kDebugMode) {
-        print('📩 Signup step1 (${res.statusCode}): ${res.body}');
+      if (res.statusCode != 200 && res.statusCode != 201) {
+        final j = jsonDecode(res.body);
+        return j["error"] ?? "Falha ao cadastrar";
       }
 
-      if (res.statusCode != 200) {
-        try {
-          final j = jsonDecode(res.body);
-          if (j is Map && j['error'] is Map && j['error']['message'] is String) {
-            return j['error']['message'];
-          }
-        } catch (_) {}
-        return 'Falha ao cadastrar (${res.statusCode})';
+      final data = jsonDecode(res.body);
+      final token = data['token'];
+      final user = data['usuario'];
+
+      if (token != null) {
+        _tokenCache = token;
+        await _storage.write(key: _tokenKey, value: token);
+        if (user != null) _userCache = user;
+        notifyListeners();
+        return true;
       }
 
-      final j1 = jsonDecode(res.body) as Map<String, dynamic>;
-      final jwt = j1['jwt'] as String?;
-      final user = j1['user'] as Map<String, dynamic>?;
+      return "Resposta inválida do servidor";
 
-      if (jwt == null || user == null) {
-        return 'Resposta inesperada do servidor';
-      }
-
-      // salva cache/token
-      _tokenCache = jwt;
-      await _storage.write(key: _tokenKey, value: jwt);
-      _userCache = user;
-
-      // 2) atualiza extras (cpf/phone) se tiver
-      final hasExtras = (phone != null && phone.isNotEmpty) || (cpf != null && cpf.isNotEmpty);
-      if (hasExtras) {
-        final upd = await http.put(
-          Uri.parse('$kApiBase/users/${user['id']}'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $jwt',
-          },
-          body: jsonEncode({
-            if (cpf != null && cpf.isNotEmpty) 'cpf': cpf,
-            if (phone != null && phone.isNotEmpty) 'phone': phone,
-          }),
-        );
-
-        if (kDebugMode) {
-          print('📩 Signup step2 (${upd.statusCode}): ${upd.body}');
-        }
-
-        if (upd.statusCode == 200) {
-          _userCache = jsonDecode(upd.body) as Map<String, dynamic>;
-        } else {
-          if (kDebugMode) {
-            print('⚠️ Cadastro ok, mas update CPF/phone falhou '
-                '(code ${upd.statusCode}). Verifique permissões.');
-          }
-        }
-      }
-
-      notifyListeners();
-      return true;
     } catch (e) {
-      if (kDebugMode) print('❌ Erro de rede no signup: $e');
-      return 'Erro de rede ao cadastrar';
+      if (kDebugMode) print("❌ Erro signup: $e");
+      return "Erro de rede";
     }
   }
 
-  // ---------- ESQUECEU SENHA ----------
+  // ======================================================
+  // ESQUECEU / RESET SENHA
+  // ======================================================
   Future<bool> requestPasswordReset(String email) async {
     try {
-      final res = await http.post(
-        Uri.parse('$kApiBase/auth/forgot-password'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email}),
-      );
+      final res = await _api.post('/forgot-password', body: {'email': email});
       return res.statusCode == 200;
-    } catch (e) {
-      if (kDebugMode) print('❌ Erro de rede no requestPasswordReset: $e');
+    } catch (_) {
       return false;
     }
   }
 
-  // ---------- RESET SENHA ----------
   Future<bool> resetPassword(String code, String newPass) async {
     try {
-      final res = await http.post(
-        Uri.parse('$kApiBase/auth/reset-password'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'code': code,
-          'password': newPass,
-          'passwordConfirmation': newPass,
-        }),
-      );
+      final res = await _api.post('/reset-password', body: {
+        'code': code,
+        'password': newPass,
+      });
       return res.statusCode == 200;
-    } catch (e) {
-      if (kDebugMode) print('❌ Erro de rede no resetPassword: $e');
+    } catch (_) {
       return false;
     }
   }

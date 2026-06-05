@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/auth_service.dart';
 import '../../services/favorites_service.dart';
+import '../../services/notification_service.dart';
 import '../../widgets/app_toast.dart';
 
 /// ===== TOKENS =====
@@ -118,6 +120,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (ok) {
       await FavoritesService.instance.init();
+      unawaited(NotificationService.instance.saveTokenAfterLogin());
       if (!mounted) return;
 
       if (widget.onLogged != null) {
@@ -137,11 +140,16 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _forgot() async {
-    if (_email.text.trim().isEmpty) {
+    final email = _email.text.trim();
+    if (email.isEmpty) {
       setState(() => _error = 'Digite seu e-mail para recuperar a senha.');
       return;
     }
-    final sent = await _auth.requestPasswordReset(_email.text.trim());
+    if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(email)) {
+      setState(() => _error = 'Informe um e-mail válido.');
+      return;
+    }
+    final sent = await _auth.requestPasswordReset(email);
     if (!mounted) return;
     AppToast.show(
       context,
