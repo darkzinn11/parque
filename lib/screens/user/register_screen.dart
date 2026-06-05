@@ -101,6 +101,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscureConfirm = true;
   bool _accept = false;
   bool _loadingCep = false;
+  int _cepSeq = 0;
   String? _topError;
 
   @override
@@ -116,9 +117,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final digits = value.replaceAll(RegExp(r'\D'), '');
     if (digits.length != 8) return;
 
+    final seq = ++_cepSeq;
     setState(() => _loadingCep = true);
     final result = await CepService.fetch(digits);
-    if (!mounted) return;
+    if (!mounted || seq != _cepSeq) return;
     setState(() => _loadingCep = false);
 
     if (result == null) {

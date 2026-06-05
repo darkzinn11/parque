@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -102,6 +103,8 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   bool _enviando = false;
   bool _loadingCepEndereco = false;
   bool _loadingCepLocal = false;
+  int _cepEnderecoSeq = 0;
+  int _cepLocalSeq = 0;
 
   static const _categorias = [
     'Infraestrutura',
@@ -152,9 +155,10 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     final digits = value.replaceAll(RegExp(r'\D'), '');
     if (digits.length != 8) return;
 
+    final seq = ++_cepEnderecoSeq;
     setState(() => _loadingCepEndereco = true);
     final result = await CepService.fetch(digits);
-    if (!mounted) return;
+    if (!mounted || seq != _cepEnderecoSeq) return;
     setState(() => _loadingCepEndereco = false);
 
     if (result == null) {
@@ -169,9 +173,10 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     final digits = value.replaceAll(RegExp(r'\D'), '');
     if (digits.length != 8) return;
 
+    final seq = ++_cepLocalSeq;
     setState(() => _loadingCepLocal = true);
     final result = await CepService.fetch(digits);
-    if (!mounted) return;
+    if (!mounted || seq != _cepLocalSeq) return;
     setState(() => _loadingCepLocal = false);
 
     if (result == null) {
@@ -666,8 +671,8 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                                               ClipRRect(
                                                 borderRadius:
                                                     BorderRadius.circular(12),
-                                                child: Image.network(
-                                                  _fotosLocais[i].path,
+                                                child: Image.file(
+                                                  File(_fotosLocais[i].path),
                                                   width: 80,
                                                   height: 80,
                                                   fit: BoxFit.cover,

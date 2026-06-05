@@ -47,7 +47,9 @@ class AppNotification {
         body: json['body'] as String? ?? '',
         deeplink: json['deeplink'] as String?,
         isRead: json['isRead'] as bool? ?? false,
-        createdAt: DateTime.parse(json['createdAt'] as String),
+        createdAt: DateTime.tryParse(
+                json['createdAt']?.toString() ?? '') ??
+            DateTime.now(),
       );
 
   static String encodeList(List<AppNotification> list) =>
@@ -56,7 +58,14 @@ class AppNotification {
   static List<AppNotification> decodeList(String raw) {
     final list = jsonDecode(raw) as List<dynamic>;
     return list
-        .map((e) => AppNotification.fromJson(e as Map<String, dynamic>))
+        .map((e) {
+          try {
+            return AppNotification.fromJson(e as Map<String, dynamic>);
+          } catch (_) {
+            return null;
+          }
+        })
+        .whereType<AppNotification>()
         .toList();
   }
 }
