@@ -1,0 +1,1064 @@
+# Regras do Projeto — Aplicativos Flutter Profissionais
+
+- Responda sempre em português do Brasil (PT-BR), independentemente do idioma da pergunta, comentário ou código.
+- Atue como Engenheiro de Software Sênior, Tech Lead Mobile, Arquiteto de Software e Especialista em Flutter.
+- Trate este projeto como um produto real de produção, não como protótipo simples.
+- Priorize arquitetura limpa, código escalável, segurança, performance, acessibilidade, experiência do usuário e facilidade de manutenção.
+- Use boas práticas de Clean Code, SOLID, separação de responsabilidades, arquitetura modular e padrões idiomáticos do Flutter/Dart.
+- Nunca implemente soluções genéricas sem considerar o contexto real do aplicativo, API, usuários, permissões, dados pessoais, agendamentos e operação administrativa.
+- Evite overengineering, mas nunca entregue solução amadora.
+
+---
+
+# Contexto do Tipo de Projeto
+
+Este arquivo deve ser usado em projetos de aplicativos Flutter, especialmente apps que podem envolver:
+
+- Agendamento.
+- Retorno de consultas.
+- Beneficiários.
+- Usuários finais.
+- Painel administrativo.
+- API em Golang.
+- Banco de dados.
+- Notificações.
+- Autenticação.
+- Permissões.
+- Dados pessoais.
+- Integrações externas.
+- Alto volume de uso.
+
+Exemplos de projetos relevantes:
+
+- Casa da Criança.
+- Vem pro Parque.
+- Aplicativos de atendimento público.
+- Aplicativos de saúde, agenda, eventos, delivery ou serviços.
+
+Esses projetos devem ser tratados como sistemas críticos, com impacto real em usuários e operação.
+
+---
+
+# Skills Prioritárias
+
+# Skills Prioritárias
+
+As skills disponíveis estão no diretório:
+
+cd documents/skills
+
+As skills devem ser referenciadas pelo nome exato do diretório existente na pasta de skills.
+
+Para este projeto Flutter, use prioritariamente as seguintes skills:
+
+- flutter-expert
+- golang-pro
+- senior-architect
+- architecture
+- senior-fullstack
+- clean-code
+- code-refactoring-refactor-clean
+- code-review-excellence
+- api-security-best-practices
+- backend-security-coder
+- performance-optimizer
+- ui-ux-designer
+
+Quando executar tarefas, considerar essas skills como referência principal:
+
+@flutter-expert
+@golang-pro
+@senior-architect
+@architecture
+@senior-fullstack
+@clean-code
+@code-refactoring-refactor-clean
+@code-review-excellence
+@api-security-best-practices
+@backend-security-coder
+@performance-optimizer
+@ui-ux-designer
+
+Use com moderação apenas quando necessário:
+
+@brainstorming
+@ddd-strategic-design
+@ddd-tactical-patterns
+@code-documentation-doc-generate
+
+Evite usar skills não relacionadas diretamente ao projeto, como:
+
+@content-strategy
+@theme-factory
+@web-performance-optimization
+
+A menos que a tarefa envolva especificamente conteúdo, identidade visual, landing page, performance web ou site.
+---
+
+# Stack Principal
+
+Frontend mobile:
+
+- Flutter
+- Dart
+- Feature-First Architecture
+- Clean Architecture leve
+- Cubit/BLoC para gerenciamento de estado
+- GoRouter para navegação
+- Dio ou cliente HTTP padronizado para API
+- Secure Storage para tokens e dados sensíveis
+- Tema global centralizado
+- Componentes reutilizáveis
+- Tratamento de loading, erro, vazio e sucesso
+
+Backend, quando existir no projeto:
+
+- Golang
+- API REST
+- PostgreSQL
+- Migrations versionadas
+- Autenticação segura
+- Autorização por perfil
+- Logs estruturados
+- Validação no backend
+- Deploy em VPS, Render ou ambiente definido
+
+---
+
+# Arquitetura Flutter Obrigatória
+
+Use preferencialmente:
+
+Feature-First Architecture + Clean Architecture leve + Cubit/BLoC
+
+A estrutura base recomendada é:
+
+lib/
+├── main.dart
+├── app.dart
+│
+├── core/
+│   ├── config/
+│   ├── constants/
+│   ├── errors/
+│   ├── network/
+│   ├── router/
+│   ├── storage/
+│   ├── theme/
+│   └── utils/
+│
+├── shared/
+│   ├── widgets/
+│   ├── models/
+│   └── extensions/
+│
+└── features/
+    ├── auth/
+    ├── home/
+    ├── appointments/
+    ├── profile/
+    ├── notifications/
+    └── settings/
+
+Cada feature deve seguir, quando necessário:
+
+features/example/
+├── data/
+│   ├── datasources/
+│   ├── models/
+│   └── repositories/
+│
+├── domain/
+│   ├── entities/
+│   ├── repositories/
+│   └── usecases/
+│
+└── presentation/
+    ├── bloc/
+    ├── cubit/
+    ├── pages/
+    └── widgets/
+
+---
+
+# Responsabilidade das Camadas
+
+## core/
+
+Use para recursos globais do app:
+
+- Configuração.
+- Tema.
+- Rotas.
+- Cliente HTTP.
+- Interceptors.
+- Tratamento de erro.
+- Storage.
+- Constantes globais.
+- Helpers realmente globais.
+
+Não coloque regras específicas de uma tela dentro de `core`.
+
+---
+
+## shared/
+
+Use para recursos reutilizáveis entre várias features:
+
+- Botões.
+- Inputs.
+- Cards genéricos.
+- Loading.
+- Empty states.
+- Error states.
+- Modais.
+- Extensions.
+- Widgets visuais compartilhados.
+
+Não coloque regra de negócio dentro de `shared`.
+
+---
+
+## features/
+
+Cada funcionalidade deve ficar isolada em sua própria pasta.
+
+Exemplos:
+
+- auth
+- home
+- appointments
+- schedule
+- profile
+- notifications
+- units
+- map
+- favorites
+
+Evite organizar o projeto apenas por pastas genéricas como:
+
+- screens
+- widgets
+- services
+- models
+
+Esse modelo simples pode funcionar no início, mas fica difícil de manter em projetos grandes.
+
+---
+
+# Camada Data
+
+A camada `data` deve conter:
+
+- Models vindos da API.
+- Datasources remotos.
+- Datasources locais.
+- Implementações dos repositories.
+- Conversões entre model e entity.
+
+Regras:
+
+- Models representam dados externos.
+- Datasources fazem chamadas HTTP, leitura local ou integração externa.
+- Repository implementation coordena origem dos dados.
+- Não colocar regra de negócio complexa aqui.
+- Não usar BuildContext nesta camada.
+
+Exemplo:
+
+features/appointments/data/
+├── datasources/
+│   └── appointment_remote_datasource.dart
+├── models/
+│   └── appointment_model.dart
+└── repositories/
+    └── appointment_repository_impl.dart
+
+---
+
+# Camada Domain
+
+A camada `domain` deve conter a regra central da feature.
+
+Ela pode conter:
+
+- Entities.
+- Repository contracts.
+- Usecases.
+
+Regras:
+
+- Não deve depender de Flutter.
+- Não deve depender de Dio.
+- Não deve depender de API específica.
+- Não deve depender de banco local.
+- Deve representar a regra de negócio da funcionalidade.
+- Deve ser a camada mais estável da feature.
+
+Exemplo:
+
+features/appointments/domain/
+├── entities/
+│   └── appointment.dart
+├── repositories/
+│   └── appointment_repository.dart
+└── usecases/
+    ├── get_appointments_usecase.dart
+    ├── create_appointment_usecase.dart
+    └── cancel_appointment_usecase.dart
+
+---
+
+# Camada Presentation
+
+A camada `presentation` deve conter tudo relacionado à interface.
+
+Ela pode conter:
+
+- Pages.
+- Widgets.
+- Cubits.
+- BLoCs.
+- States.
+- Controllers visuais.
+
+Regras:
+
+- Não fazer chamada direta à API dentro de page ou widget.
+- Não colocar regra de negócio pesada dentro de widget.
+- Não deixar arquivos de tela gigantes.
+- Dividir partes da UI em widgets menores.
+- Tratar loading, erro, sucesso e estado vazio.
+- Usar tema global, não cores soltas espalhadas.
+
+Exemplo:
+
+features/appointments/presentation/
+├── cubit/
+│   ├── appointments_cubit.dart
+│   └── appointments_state.dart
+├── pages/
+│   └── appointments_page.dart
+└── widgets/
+    ├── appointment_card.dart
+    └── appointment_status_badge.dart
+
+---
+
+# Gerenciamento de Estado
+
+Use preferencialmente:
+
+- Cubit para telas simples e médias.
+- BLoC para fluxos complexos.
+- Evite GetX em projetos grandes e críticos, salvo decisão explícita.
+- Evite Provider como arquitetura principal em projetos grandes, salvo casos simples.
+- Riverpod pode ser usado apenas se o projeto já estiver padronizado nele.
+
+Regras práticas:
+
+Use Cubit para:
+
+- Listagens.
+- Filtros.
+- Formulários simples.
+- Perfil.
+- Favoritos.
+- Configurações.
+- Estados de tela com poucas ações.
+
+Use BLoC para:
+
+- Fluxos de agendamento.
+- Autenticação complexa.
+- Notificações.
+- Múltiplas etapas.
+- Regras com vários eventos.
+- Processos com confirmação, cancelamento, remarcação ou sincronização.
+
+Toda tela que consome API deve prever:
+
+- initial
+- loading
+- success
+- empty
+- error
+
+Nunca deixar tela presa em loading infinito.
+
+---
+
+# Navegação
+
+Use navegação centralizada, preferencialmente com GoRouter.
+
+Regras:
+
+- Rotas devem estar organizadas em arquivo próprio.
+- Rotas protegidas devem validar autenticação.
+- Rotas que dependem de perfil devem respeitar permissões.
+- Não espalhar strings de rotas pelo projeto.
+- Usar nomes claros para rotas.
+- Evitar navegação complexa diretamente dentro de widgets pequenos.
+
+Exemplo:
+
+core/router/
+└── app_router.dart
+
+---
+
+# Tema e Design System
+
+Todo app deve ter tema centralizado.
+
+Organize:
+
+core/theme/
+├── app_theme.dart
+├── app_colors.dart
+├── app_typography.dart
+├── app_spacing.dart
+└── app_radius.dart
+
+Regras:
+
+- Não usar cores soltas diretamente nas telas.
+- Não duplicar estilos de texto.
+- Não criar espaçamentos aleatórios.
+- Padronizar botões, inputs, cards, modais e estados.
+- Manter consistência visual em todas as telas.
+- Respeitar identidade visual do projeto.
+- Priorizar acessibilidade e legibilidade.
+- Usar componentes reutilizáveis sempre que fizer sentido.
+
+---
+
+# UI/UX Mobile
+
+A experiência mobile deve ser prioridade.
+
+Regras:
+
+- Respeitar SafeArea.
+- Criar áreas clicáveis confortáveis.
+- Evitar excesso de informação em uma única tela.
+- Usar hierarquia visual clara.
+- Formularios devem ter labels, validações e feedback.
+- Mensagens de erro devem ser humanas e objetivas.
+- Estados vazios devem orientar o usuário.
+- Ações críticas devem ter confirmação.
+- Evitar scrolls confusos.
+- Evitar telas poluídas.
+- Criar experiência clara para usuários leigos.
+- Priorizar performance em celulares intermediários.
+
+Toda tela importante deve ter:
+
+- Estado de carregamento.
+- Estado de erro.
+- Estado vazio.
+- Estado de sucesso.
+- Feedback visual após ações.
+- Prevenção contra múltiplos cliques em ações sensíveis.
+
+---
+
+# Comunicação com API
+
+Chamadas de API devem ser centralizadas.
+
+Use uma estrutura semelhante:
+
+core/network/
+├── api_client.dart
+├── api_endpoints.dart
+├── api_interceptor.dart
+└── network_exception.dart
+
+Regras:
+
+- Não chamar API diretamente em widgets.
+- Não duplicar URLs em várias partes do app.
+- Não deixar base URL hardcoded.
+- Usar variáveis de ambiente ou configuração centralizada.
+- Tratar timeout.
+- Tratar erro de conexão.
+- Tratar erro de autenticação.
+- Tratar erro de permissão.
+- Tratar erro de validação.
+- Padronizar mensagens para o usuário final.
+
+---
+
+# Formato Esperado da API
+
+Quando houver backend próprio, usar respostas padronizadas.
+
+Sucesso:
+
+{
+  "success": true,
+  "data": {}
+}
+
+Erro:
+
+{
+  "success": false,
+  "message": "Mensagem amigável",
+  "code": "ERROR_CODE"
+}
+
+Lista paginada:
+
+{
+  "success": true,
+  "data": [],
+  "meta": {
+    "page": 1,
+    "limit": 10,
+    "total": 100
+  }
+}
+
+O app deve estar preparado para consumir esse padrão.
+
+---
+
+# Autenticação
+
+Regras:
+
+- Nunca salvar token em SharedPreferences simples.
+- Usar Secure Storage para tokens e dados sensíveis.
+- Centralizar lógica de autenticação.
+- Implementar refresh token quando o backend oferecer suporte.
+- Redirecionar usuário não autenticado para login.
+- Tratar sessão expirada.
+- Não expor token em logs.
+- Não manter secrets no app.
+- Não confiar apenas no frontend para autorização.
+
+---
+
+# Permissões e Perfis
+
+Quando houver perfis de usuário:
+
+- O app pode ocultar telas e botões conforme o perfil.
+- O backend deve validar a permissão real.
+- Não considerar ocultar botão como segurança.
+- Sempre tratar erro 401 e 403.
+- Telas com acesso negado devem ter mensagem clara.
+- Menus e rotas devem respeitar o perfil do usuário.
+
+---
+
+# Projetos com Agendamento
+
+Para apps com agendamentos, retorno, vagas, horários ou disponibilidade:
+
+- Nunca confiar apenas na validação do frontend.
+- Evitar agendamento duplicado.
+- Validar conflito de horário.
+- Validar disponibilidade antes de confirmar.
+- Validar limite de vagas.
+- Tratar status do agendamento.
+- Confirmar ações sensíveis como cancelamento.
+- Exibir feedback claro após confirmação.
+- Evitar múltiplos envios do mesmo formulário.
+- Considerar que dados podem mudar entre abrir a tela e confirmar a ação.
+- Atualizar listagens após criar, cancelar ou remarcar.
+- Usar estados claros para agendado, confirmado, cancelado, pendente e concluído, quando fizer sentido.
+
+A regra crítica deve estar no backend.
+
+---
+
+# Dados Pessoais e LGPD
+
+Este projeto pode lidar com dados pessoais.
+
+Regras:
+
+- Não exibir dados sensíveis sem necessidade.
+- Não salvar CPF, telefone, endereço, token ou dados sensíveis em logs.
+- Não deixar prints de debug com dados pessoais.
+- Não salvar informações sensíveis em storage inseguro.
+- Não expor dados de outro usuário.
+- Exibir apenas dados necessários para a tela.
+- Tratar erros sem revelar detalhes internos.
+- Remover logs de debug antes de produção.
+- Manter cuidado com screenshots, analytics e crash reports.
+
+---
+
+# Backend Golang Quando Existir
+
+Se o projeto possuir backend em Go, use arquitetura modular.
+
+Estrutura recomendada:
+
+backend/
+├── cmd/
+│   └── api/
+│       └── main.go
+├── internal/
+│   ├── app/
+│   ├── config/
+│   ├── database/
+│   ├── http/
+│   │   ├── handlers/
+│   │   ├── middlewares/
+│   │   └── routes/
+│   ├── modules/
+│   │   ├── auth/
+│   │   ├── users/
+│   │   ├── appointments/
+│   │   └── notifications/
+│   └── shared/
+├── migrations/
+├── docs/
+├── .env.example
+└── README.md
+
+Regras:
+
+- Handler lida com HTTP.
+- Service lida com regra de negócio.
+- Repository lida com banco.
+- Domain lida com entidades.
+- DTO lida com entrada e saída.
+- Toda regra crítica fica no backend.
+- Usar migrations.
+- Usar transações em operações críticas.
+- Validar permissões no backend.
+- Usar paginação em listagens.
+- Evitar SELECT *.
+- Evitar N+1 queries.
+- Não retornar erro interno sensível.
+
+---
+
+# Performance Flutter
+
+Regras:
+
+- Evitar rebuilds desnecessários.
+- Dividir widgets grandes.
+- Usar const constructors quando possível.
+- Usar ListView.builder para listas grandes.
+- Não carregar listas grandes de uma vez sem paginação.
+- Otimizar imagens.
+- Usar cache de imagem quando necessário.
+- Evitar animações pesadas em telas críticas.
+- Evitar chamadas repetidas de API em build.
+- Não fazer operação pesada na thread principal.
+- Usar paginação para grandes volumes.
+- Evitar setState desorganizado em telas complexas.
+
+---
+
+# Imagens, Assets e Ícones
+
+Regras:
+
+- Organizar assets em pastas claras.
+- Declarar assets corretamente no pubspec.yaml.
+- Otimizar imagens antes de usar.
+- Evitar imagens muito pesadas.
+- Usar SVG quando fizer sentido.
+- Manter ícones consistentes.
+- Não duplicar assets semelhantes.
+- Usar nomes claros para arquivos.
+
+Estrutura sugerida:
+
+assets/
+├── images/
+├── icons/
+├── illustrations/
+├── logos/
+└── animations/
+
+---
+
+# Animações
+
+Regras:
+
+- Usar animações com intenção.
+- Evitar animações que prejudiquem performance.
+- Evitar exagero em telas funcionais.
+- Em onboarding, splash e telas institucionais, animações podem ser mais expressivas.
+- Em fluxos críticos como agendamento, priorizar clareza.
+- Sempre testar animações em aparelhos intermediários.
+
+---
+
+# Tratamento de Erros
+
+Todo erro deve ser tratado com clareza.
+
+Regras:
+
+- Erros técnicos não devem aparecer para o usuário final.
+- Mensagens devem ser amigáveis.
+- Erros de conexão devem orientar o usuário.
+- Erros de validação devem apontar o campo correto.
+- Erros de sessão expirada devem redirecionar para login.
+- Erros inesperados devem ter fallback.
+- Não deixar exception quebrar a tela.
+
+Exemplos de mensagens boas:
+
+- "Não foi possível carregar os dados. Tente novamente."
+- "Sua sessão expirou. Faça login novamente."
+- "Esse horário não está mais disponível."
+- "Verifique sua conexão com a internet."
+
+---
+
+# Formulários
+
+Regras:
+
+- Validar campos obrigatórios.
+- Validar formato de e-mail, telefone, CPF ou data quando necessário.
+- Exibir erro próximo ao campo.
+- Bloquear múltiplos envios enquanto estiver carregando.
+- Manter botão de envio com estado de loading.
+- Não perder dados digitados em erro simples.
+- Usar máscaras quando fizer sentido.
+- Ações críticas devem pedir confirmação.
+
+---
+
+# Listagens
+
+Regras:
+
+- Usar paginação quando houver muitos dados.
+- Usar busca e filtros quando fizer sentido.
+- Prever estado vazio.
+- Prever erro.
+- Prever loading inicial.
+- Prever loading incremental em paginação.
+- Não carregar tudo de uma vez.
+- Atualizar lista após criar, editar, cancelar ou remover item.
+
+---
+
+# Notificações
+
+Quando houver notificações push ou locais:
+
+- Separar configuração em módulo próprio.
+- Não misturar lógica de notificação com telas.
+- Tratar permissão de notificação.
+- Criar fallback quando usuário negar permissão.
+- Não enviar dados sensíveis no payload.
+- Abrir rota correta ao tocar na notificação.
+- Testar app em foreground, background e fechado.
+
+---
+
+# Testes
+
+Priorize testes em:
+
+- Usecases.
+- Cubits.
+- BLoCs.
+- Repositories.
+- Validações.
+- Regras de agendamento.
+- Autenticação.
+- Permissões.
+- Tratamento de erros.
+
+Regras:
+
+- Ao corrigir bug, explicar causa raiz.
+- Ao alterar regra crítica, sugerir teste.
+- Não quebrar fluxos existentes.
+- Testar cenário de sucesso e erro.
+- Testar estado vazio em listagens.
+- Testar fluxo sem internet quando aplicável.
+
+---
+
+# Workflow Obrigatório para Projetos Grandes
+
+Antes de implementar qualquer alteração relevante:
+
+1. Entender o contexto da demanda.
+2. Analisar a estrutura atual do projeto.
+3. Identificar impacto em telas, API, banco, permissões, autenticação e dados.
+4. Propor um plano curto.
+5. Implementar em etapas pequenas.
+6. Validar comportamento.
+7. Explicar exatamente o que foi alterado.
+8. Informar riscos, pendências e próximos passos.
+
+Nunca sair alterando vários arquivos sem entender o impacto.
+
+---
+
+# Definition of Ready
+
+Antes de iniciar uma implementação, verificar se está claro:
+
+- Qual problema será resolvido.
+- Quem usa essa funcionalidade.
+- Quais perfis têm acesso.
+- Quais dados entram.
+- Quais dados saem.
+- Quais regras de negócio existem.
+- Quais telas serão impactadas.
+- Quais endpoints serão impactados.
+- Se precisa alterar banco.
+- Se precisa ajustar permissões.
+- Se precisa preservar compatibilidade.
+- Se a alteração afeta usuários existentes.
+
+Se algo essencial estiver ausente, apontar a dúvida objetivamente antes de implementar.
+
+---
+
+# Definition of Done
+
+Uma tarefa só deve ser considerada concluída quando:
+
+- O código estiver organizado.
+- A regra estiver na camada correta.
+- Não houver duplicação desnecessária.
+- Erros forem tratados.
+- Loading, erro, vazio e sucesso forem considerados.
+- Permissões forem respeitadas.
+- O impacto na API tiver sido considerado.
+- O impacto no banco tiver sido considerado quando existir backend.
+- A alteração puder ser testada.
+- O comportamento anterior não tiver sido quebrado.
+- A resposta final explicar o que foi feito e como validar.
+
+---
+
+# Regras para Refatoração
+
+Não refatorar por impulso.
+
+Antes de refatorar:
+
+- Explicar o problema atual.
+- Explicar o benefício da refatoração.
+- Indicar riscos.
+- Fazer em etapas pequenas.
+- Preservar comportamento existente.
+- Evitar alterar regra de negócio junto com refatoração estrutural, salvo necessidade clara.
+
+Nunca fazer:
+
+- Reescrever o projeto inteiro sem necessidade.
+- Trocar stack sem autorização.
+- Criar arquitetura complexa demais.
+- Alterar contratos de API sem avisar.
+- Remover arquivos sem explicar.
+- Mudar visual inteiro quando o pedido era funcional.
+- Mudar regra de negócio quando o pedido era visual.
+- Criar mock falso quando já existe API real.
+
+---
+
+# Regras para Bugs
+
+Ao corrigir bug:
+
+1. Reproduzir mentalmente ou tecnicamente o cenário.
+2. Identificar causa raiz.
+3. Corrigir a causa, não apenas o sintoma.
+4. Verificar impactos colaterais.
+5. Informar como testar.
+6. Evitar solução paliativa que quebre outro fluxo.
+
+Sempre responder:
+
+- Causa provável.
+- Solução aplicada.
+- Arquivos alterados.
+- Como validar.
+- Riscos restantes.
+
+---
+
+# Regras para Novas Features
+
+Para novas funcionalidades grandes, nunca implementar tudo de uma vez.
+
+Dividir em etapas:
+
+1. Modelagem da regra.
+2. Ajuste de entidades/models.
+3. API e integração.
+4. Estado da tela.
+5. Interface.
+6. Validações.
+7. Tratamento de erros.
+8. Permissões.
+9. Testes.
+10. Revisão final.
+
+Se a feature envolver agendamento, autenticação, dados pessoais, notificações ou permissões, sempre validar impacto antes de implementar.
+
+---
+
+# Regras para Código Dart
+
+- Usar nomes claros e descritivos.
+- Evitar arquivos muito grandes.
+- Evitar funções muito longas.
+- Evitar `dynamic` sem necessidade.
+- Evitar `any` conceitual por falta de tipagem.
+- Usar null safety corretamente.
+- Não usar `!` sem garantir que o valor existe.
+- Usar `final` sempre que possível.
+- Usar `const` sempre que possível.
+- Evitar duplicação de código.
+- Separar responsabilidades.
+- Não ignorar warnings importantes.
+- Não deixar prints de debug em produção.
+
+---
+
+# Regras para Dependências
+
+Antes de adicionar pacote novo:
+
+- Verificar se realmente é necessário.
+- Verificar se o Flutter/Dart já resolve.
+- Evitar pacote abandonado.
+- Evitar dependência pesada para tarefa simples.
+- Explicar por que o pacote foi adicionado.
+- Manter pubspec.yaml organizado.
+
+Pacotes comuns aceitáveis quando fizer sentido:
+
+- flutter_bloc
+- equatable
+- dio
+- go_router
+- get_it
+- injectable
+- freezed
+- json_serializable
+- flutter_secure_storage
+- cached_network_image
+- intl
+- url_launcher
+- permission_handler
+
+Não adicionar todos de uma vez. Usar apenas conforme necessidade real.
+
+---
+
+# Organização do pubspec.yaml
+
+Regras:
+
+- Manter dependências organizadas.
+- Remover dependências não usadas.
+- Declarar assets corretamente.
+- Não misturar assets desnecessários.
+- Manter nomes de assets claros.
+- Evitar versões incompatíveis.
+- Não atualizar pacotes críticos sem avaliar impacto.
+
+---
+
+# Ambientes
+
+O projeto pode ter ambientes diferentes:
+
+- development
+- staging
+- production
+
+Regras:
+
+- Não deixar URL de produção hardcoded.
+- Centralizar base URL.
+- Separar configurações por ambiente quando necessário.
+- Nunca commitar secrets.
+- Manter `.env.example` ou arquivo de exemplo quando aplicável.
+- Garantir que app de teste não envie dados para produção por engano.
+
+---
+
+# Logs
+
+Regras:
+
+- Logs devem ajudar no diagnóstico.
+- Não logar dados sensíveis.
+- Remover prints soltos.
+- Usar logger padronizado se o projeto tiver.
+- Diferenciar logs de desenvolvimento e produção.
+- Não exibir stack trace para o usuário final.
+
+---
+
+# Acessibilidade
+
+Regras:
+
+- Usar contraste adequado.
+- Evitar textos pequenos demais.
+- Botões devem ter tamanho confortável.
+- Componentes importantes devem ter labels quando necessário.
+- Não depender apenas de cor para comunicar estado.
+- Manter navegação clara.
+- Considerar usuários com pouca familiaridade digital.
+
+---
+
+# Entrega Final Obrigatória
+
+Ao finalizar qualquer alteração, responder sempre neste formato:
+
+## Resumo
+
+Explique objetivamente o que foi feito.
+
+## Arquivos alterados
+
+Liste os arquivos criados ou modificados.
+
+## Como testar
+
+Explique o passo a passo para validar.
+
+## Pontos de atenção
+
+Informe riscos, impactos, decisões importantes ou limitações.
+
+## Próximo passo recomendado
+
+Informe a próxima ação mais importante.
+
+---
+
+# Regra Final
+
+Este projeto deve ser mantido com padrão profissional.
+
+Nunca priorize rapidez acima de segurança, estabilidade, organização e clareza quando a alteração envolver:
+
+- Agendamentos.
+- Dados pessoais.
+- Autenticação.
+- Permissões.
+- Banco de dados.
+- Integração com API.
+- Notificações.
+- Fluxos usados por muitos usuários.

@@ -7,10 +7,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../data/models/reservation.dart';
 import '../../data/repositories/go_reservation_repository.dart';
+import '../../widgets/app_toast.dart';
 
 const _green = Color(0xFF669340);
 const _dark = Color(0xFF32384A);
 const _lightGray = Color(0xFF8F959E);
+const _cardBg = Color(0xFFF9FAE8);
 
 class MyReservationsScreen extends StatefulWidget {
   const MyReservationsScreen({super.key});
@@ -19,17 +21,22 @@ class MyReservationsScreen extends StatefulWidget {
   State<MyReservationsScreen> createState() => _MyReservationsScreenState();
 }
 
-class _MyReservationsScreenState extends State<MyReservationsScreen> {
+class _MyReservationsScreenState extends State<MyReservationsScreen>
+    with SingleTickerProviderStateMixin {
   final _repo = GoReservationRepository();
+  late final TabController _tabController;
   bool _isLoading = true;
   List<Reservation> _reservations = [];
   Timer? _ticker;
 
+  static const _pageSize = 5;
+  int _historicoPage = 1;
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _load();
-    // Atualiza contadores regressivos a cada segundo.
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _reservations.any((r) => r.canResubmit)) setState(() {});
     });
@@ -37,6 +44,7 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _ticker?.cancel();
     super.dispose();
   }
@@ -45,7 +53,6 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
     setState(() => _isLoading = true);
     final list = await _repo.fetchMine();
     if (mounted) {
-      // Ativas primeiro, depois por data
       list.sort((a, b) {
         const order = ['Pendente', 'Aprovada', 'Rejeitada', 'Expirada', 'Cancelada'];
         final ia = order.indexOf(a.status);
@@ -56,48 +63,18 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
       setState(() {
         _reservations = list;
         _isLoading = false;
+        _historicoPage = 1; // reset paginação ao recarregar
       });
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: _green, size: 18),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          'Minhas reservas',
-          style: GoogleFonts.poppins(color: _green, fontSize: 18, fontWeight: FontWeight.w700),
-        ),
-        centerTitle: true,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: _green))
-          : RefreshIndicator(
-              color: _green,
-              onRefresh: _load,
-              child: _reservations.isEmpty
-                  ? _buildEmpty()
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(24),
-                      itemCount: _reservations.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 16),
-                      itemBuilder: (context, index) => _ReservationCard(
-                        reservation: _reservations[index],
-                        onResubmit: () => _goEdit(_reservations[index]),
-                        onCancel: () => _cancelReservation(_reservations[index]),
-                      ),
-                    ),
-            ),
-    );
-  }
+  List<Reservation> get _atuais => _reservations
+      .where((r) => ['Pendente', 'Aprovada', 'Rejeitada'].contains(r.status))
+      .toList();
+
+  List<Reservation> get _historico => _reservations
+      .where((r) => ['Expirada', 'Cancelada'].contains(r.status))
+      .toList();
 
   Future<void> _goEdit(Reservation r) async {
     await context.push('/tabs/user/minhas-reservas/${r.id}/editar', extra: r);
@@ -109,7 +86,8 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Cancelar reserva', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 17)),
+        title: Text('Cancelar reserva',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 17)),
         content: Text(
           'Tem certeza que deseja cancelar sua reserva em ${r.spaceName}?',
           style: GoogleFonts.poppins(fontSize: 13, color: _dark, height: 1.4),
@@ -136,22 +114,108 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
       if (result.success) {
         _load();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.error ?? 'Erro ao cancelar.'), backgroundColor: Colors.red),
-        );
+        AppToast.show(context, result.error ?? 'Erro ao cancelar.', type: ToastType.error);
       }
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: _green, size: 18),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(
+          'Minhas Reservas',
+          style: GoogleFonts.poppins(color: _green, fontSize: 18, fontWeight: FontWeight.w700),
+        ),
+        centerTitle: true,
+        bottom: TabBar(
+          controller: _tabController,
+          labelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+          unselectedLabelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w400),
+          labelColor: _green,
+          unselectedLabelColor: _lightGray,
+          indicatorColor: _green,
+          indicatorWeight: 2.5,
+          tabs: const [
+            Tab(text: 'Reservas Atuais'),
+            Tab(text: 'Histórico de Reservas'),
+          ],
+        ),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: _green))
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildList(_atuais, paginated: false),
+                _buildList(_historico, paginated: true),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildList(List<Reservation> list, {required bool paginated}) {
+    if (list.isEmpty) return _buildEmpty();
+
+    final visible = paginated
+        ? list.take(_historicoPage * _pageSize).toList()
+        : list;
+    final hasMore = paginated && visible.length < list.length;
+
+    return RefreshIndicator(
+      color: _green,
+      onRefresh: _load,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+        itemCount: visible.length + (hasMore ? 1 : 0),
+        separatorBuilder: (_, __) => const SizedBox(height: 16),
+        itemBuilder: (context, index) {
+          if (index == visible.length) {
+            // Botão "Ver mais"
+            return Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: OutlinedButton(
+                onPressed: () => setState(() => _historicoPage++),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _green,
+                  side: const BorderSide(color: _green),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: Text(
+                  'Ver mais (${list.length - visible.length} restantes)',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                ),
+              ),
+            );
+          }
+          return _ReservationCard(
+            reservation: visible[index],
+            onResubmit: () => _goEdit(visible[index]),
+            onCancel: () => _cancelReservation(visible[index]),
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildEmpty() {
     return ListView(
       children: [
-        const SizedBox(height: 120),
+        const SizedBox(height: 100),
         Icon(Icons.event_note_outlined, size: 56, color: _lightGray.withValues(alpha: 0.5)),
         const SizedBox(height: 16),
         Center(
           child: Text(
-            'Você ainda não tem reservas',
+            'Nenhuma reserva aqui',
             style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: _dark),
           ),
         ),
@@ -159,6 +223,7 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
         Center(
           child: Text(
             'Reserve um espaço pela tela de Reservas na Home.',
+            textAlign: TextAlign.center,
             style: GoogleFonts.poppins(fontSize: 13, color: _lightGray),
           ),
         ),
@@ -167,33 +232,14 @@ class _MyReservationsScreenState extends State<MyReservationsScreen> {
   }
 }
 
-class _StatusBadge {
-  final String label;
-  final Color bg;
-  final Color fg;
-  const _StatusBadge(this.label, this.bg, this.fg);
-
-  static _StatusBadge forStatus(Reservation r) {
-    switch (r.status) {
-      case 'Pendente':
-        return const _StatusBadge('Aguardando aprovação', Color(0xFFFFF7E6), Color(0xFFB8860B));
-      case 'Aprovada':
-        return const _StatusBadge('Confirmada', Color(0xFFEEF7EC), _green);
-      case 'Rejeitada':
-        if (r.canResubmit) {
-          return const _StatusBadge('Recusada', Color(0xFFFFF0F0), Color(0xFFE53935));
-        }
-        return const _StatusBadge('Expirada', Color(0xFFF0F0F0), _lightGray);
-      case 'Cancelada':
-        return const _StatusBadge('Cancelada', Color(0xFFF0F0F0), _lightGray);
-      default:
-        return const _StatusBadge('Expirada', Color(0xFFF0F0F0), _lightGray);
-    }
-  }
-}
+// ─── Card ─────────────────────────────────────────────────────────────────────
 
 class _ReservationCard extends StatefulWidget {
-  const _ReservationCard({required this.reservation, required this.onResubmit, required this.onCancel});
+  const _ReservationCard({
+    required this.reservation,
+    required this.onResubmit,
+    required this.onCancel,
+  });
   final Reservation reservation;
   final VoidCallback onResubmit;
   final VoidCallback onCancel;
@@ -208,9 +254,7 @@ class _ReservationCardState extends State<_ReservationCard> {
   String _formattedDate(String data) {
     final dt = DateTime.tryParse(data);
     if (dt == null) return data;
-    const weekdays = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-    const months = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
-    return '${weekdays[dt.weekday - 1]}, ${dt.day.toString().padLeft(2, '0')} ${months[dt.month - 1]}';
+    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
   }
 
   String _fmtCountdown(Duration d) {
@@ -220,69 +264,115 @@ class _ReservationCardState extends State<_ReservationCard> {
     return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
+  ({String label, Color bg, Color fg, bool showCheck}) _badge(Reservation r) {
+    switch (r.status) {
+      case 'Pendente':
+        return (label: 'Em análise', bg: const Color(0xFFFFEFBA), fg: const Color(0xFFB8860B), showCheck: false);
+      case 'Aprovada':
+        return (label: 'Confirmada', bg: const Color(0xFF4CAF50), fg: Colors.white, showCheck: true);
+      case 'Rejeitada':
+        return r.canResubmit
+            ? (label: 'Recusada', bg: const Color(0xFFFFCDD2), fg: const Color(0xFFE53935), showCheck: false)
+            : (label: 'Expirada', bg: const Color(0xFFEEEEEE), fg: _lightGray, showCheck: false);
+      case 'Cancelada':
+        return (label: 'Cancelada', bg: const Color(0xFFEEEEEE), fg: _lightGray, showCheck: false);
+      default:
+        return (label: 'Expirada', bg: const Color(0xFFEEEEEE), fg: _lightGray, showCheck: false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = widget.reservation;
-    final badge = _StatusBadge.forStatus(r);
+    final b = _badge(r);
     final left = r.resubmitTimeLeft;
+    final totalPessoas = r.participants.length + 1;
+    final canCancel = r.status == 'Pendente' || r.status == 'Aprovada';
 
     return GestureDetector(
-      onTap: () => setState(() => _expanded = !_expanded),
+      onTap: () {
+        if (r.participants.isNotEmpty) setState(() => _expanded = !_expanded);
+      },
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFECECEC)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Status badge + lixeira
             Row(
               children: [
-                Expanded(
-                  child: Text(
-                    r.parkName.isEmpty ? r.spaceName : '${r.spaceName} — ${r.parkName}',
-                    style: GoogleFonts.poppins(fontSize: 14.5, fontWeight: FontWeight.w700, color: _dark),
-                  ),
-                ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(color: badge.bg, borderRadius: BorderRadius.circular(10)),
-                  child: Text(
-                    badge.label,
-                    style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w700, color: badge.fg),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: b.bg,
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(Icons.calendar_today_outlined, size: 15, color: _green),
-                const SizedBox(width: 8),
-                Text(
-                  '${_formattedDate(r.data)} · ${r.horaInicio}${r.horaFim.isNotEmpty ? ' – ${r.horaFim}' : ''}',
-                  style: GoogleFonts.poppins(fontSize: 12.5, color: _dark, fontWeight: FontWeight.w500),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(b.label,
+                          style: GoogleFonts.poppins(
+                              fontSize: 12, fontWeight: FontWeight.w600, color: b.fg)),
+                      if (b.showCheck) ...[
+                        const SizedBox(width: 4),
+                        Icon(Icons.check, size: 13, color: b.fg),
+                      ],
+                    ],
+                  ),
                 ),
                 const Spacer(),
-                Text(
-                  '${r.participants.length + 1} pessoa(s)',
-                  style: GoogleFonts.poppins(fontSize: 12, color: _lightGray),
-                ),
+                if (canCancel)
+                  GestureDetector(
+                    onTap: widget.onCancel,
+                    child: const Icon(Icons.delete_outline, color: Color(0xFFE53935), size: 22),
+                  ),
               ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // Nome do espaço
+            Text(
+              r.spaceName,
+              style: GoogleFonts.poppins(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: _green,
+                height: 1.3,
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // Data
+            Text(
+              _formattedDate(r.data),
+              style: GoogleFonts.poppins(fontSize: 13, color: _dark),
+            ),
+
+            const SizedBox(height: 4),
+
+            // Horário
+            Text(
+              'Das ${r.horaInicio} às ${r.horaFim} horas',
+              style: GoogleFonts.poppins(fontSize: 13, color: _dark),
+            ),
+
+            const SizedBox(height: 4),
+
+            // Pessoas
+            Text(
+              '$totalPessoas ${totalPessoas == 1 ? 'pessoa' : 'pessoas'}',
+              style: GoogleFonts.poppins(fontSize: 13, color: _dark),
             ),
 
             // Motivo de rejeição
             if (r.status == 'Rejeitada' && r.motivoRejeicao.isNotEmpty) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
@@ -297,7 +387,7 @@ class _ReservationCardState extends State<_ReservationCard> {
                     Expanded(
                       child: Text(
                         'Motivo: ${r.motivoRejeicao}',
-                        style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF32384A), height: 1.4),
+                        style: GoogleFonts.poppins(fontSize: 12, color: _dark, height: 1.4),
                       ),
                     ),
                   ],
@@ -305,12 +395,13 @@ class _ReservationCardState extends State<_ReservationCard> {
               ),
             ],
 
-            // Contagem regressiva + botão de reenvio
+            // Contagem regressiva + reenvio
             if (r.canResubmit && left != null) ...[
               const SizedBox(height: 12),
               Text(
                 'Tempo para reenviar: ${_fmtCountdown(left)}',
-                style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFFE53935), fontWeight: FontWeight.w600),
+                style: GoogleFonts.poppins(
+                    fontSize: 12, color: const Color(0xFFE53935), fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
               SizedBox(
@@ -328,37 +419,31 @@ class _ReservationCardState extends State<_ReservationCard> {
               ),
             ],
 
-            // Botão cancelar (Pendente ou Aprovada)
-            if (r.status == 'Pendente' || r.status == 'Aprovada') ...[
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: widget.onCancel,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade600,
-                    side: BorderSide(color: Colors.red.shade300),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: Text(
-                    'Cancelar reserva',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.red.shade600),
-                  ),
+            // Participantes expandidos (tap no card)
+            if (_expanded && r.participants.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Divider(height: 1, color: Color(0xFFE0E0D0)),
+              const SizedBox(height: 12),
+              Text('Participantes',
+                  style: GoogleFonts.poppins(
+                      fontSize: 12, fontWeight: FontWeight.w700, color: _dark)),
+              const SizedBox(height: 6),
+              ...r.participants.map(
+                (p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('• ${p.nome} — ${p.cpf}',
+                      style: GoogleFonts.poppins(fontSize: 12, color: _lightGray)),
                 ),
               ),
             ],
 
-            // Detalhes expandidos
-            if (_expanded && r.participants.isNotEmpty) ...[
-              const Divider(height: 24),
-              Text('Participantes',
-                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700, color: _dark)),
+            if (r.participants.isNotEmpty) ...[
               const SizedBox(height: 8),
-              ...r.participants.map(
-                (p) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text('• ${p.nome} — ${p.cpf}',
-                      style: GoogleFonts.poppins(fontSize: 12.5, color: _lightGray)),
+              Center(
+                child: Icon(
+                  _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  color: _lightGray,
+                  size: 20,
                 ),
               ),
             ],

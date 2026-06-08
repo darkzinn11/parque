@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
-// import 'package:lottie/lottie.dart'; // <<< 1. REMOVIDO
-import 'package:flutter_svg/flutter_svg.dart'; // <<< 2. ADICIONADO
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../routes/app_router.dart';
+
+const String kOnboardingSeenKey = 'onboarding_seen';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -16,55 +19,83 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
 
-  // <<< 3. LISTA ATUALIZADA para usar SVGs >>>
   final List<Map<String, String>> _pages = [
     {
       "title": "Descubra os Parques",
-      "subtitle": "Conheça os parques de São Luís e encontre o espaço ideal para você.",
-      "svg": "assets/images/onboarding1.svg", // Assumindo que seus SVGs estão em assets/images/
+      "subtitle":
+          "Conheça os parques de São Luís e encontre o espaço ideal para você.",
+      "svg": "assets/images/onboarding1.svg",
     },
     {
       "title": "Atividades e Eventos",
-      "subtitle": "Fique por dentro da agenda de eventos e agende sua participação.",
+      "subtitle":
+          "Fique por dentro da agenda de eventos e agende sua participação.",
       "svg": "assets/images/onboarding2.svg",
     },
     {
       "title": "Reserve Seu Espaço",
-      "subtitle": "Agende quadras, áreas de lazer ou espaços para o seu grupo.",
+      "subtitle":
+          "Agende quadras, áreas de lazer ou espaços para o seu grupo.",
       "svg": "assets/images/onboarding3.svg",
     },
     {
-      "title": "Tudo pronto!",
-      "subtitle": "Agora, reúna sua galera\ne Vem Pro Parque!",
+      "title": "Vem pro Parque!",
+      "subtitle":
+          "Agende quadras, áreas de lazer\nou espaços para o seu grupo.",
       "svg": "assets/images/onboarding4.svg",
     },
   ];
 
-  void _nextPage() {
+  /// cache simples dos SVGs
+  late final Map<String, SvgPicture> _svgCache;
+
+  @override
+  void initState() {
+    super.initState();
+    _svgCache = {
+      for (final page in _pages)
+        page['svg']!: SvgPicture.asset(
+          page['svg']!,
+          fit: BoxFit.contain,
+        ),
+    };
+  }
+
+  Future<void> _nextPage() async {
     if (_currentPage == _pages.length - 1) {
+      // ✅ Última página: marca que o onboarding foi concluído
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(kOnboardingSeenKey, true);
+
+      if (!mounted) return;
       context.go(AppRoutes.home);
     } else {
       _pageController.nextPage(
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
       );
     }
   }
-  
-  // <<< 4. FUNÇÃO TROCADA de Lottie para SVG >>>
-  Widget _buildSvg(String path, {double w = 342, double h = 238}) {
+
+  Widget _buildSvg(String path, double maxWidth, double maxHeight) {
     return SizedBox(
-      width: w,
-      height: h,
-      child: SvgPicture.asset(
-        path,
-        fit: BoxFit.contain,
-      ),
+      width: maxWidth,
+      height: maxHeight,
+      child: _svgCache[path],
     );
   }
 
   @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final bool isSmallScreen = size.height < 700;
+
     return Scaffold(
       body: Stack(
         children: [
@@ -76,129 +107,151 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
 
-          /// Páginas
-          PageView.builder(
-            controller: _pageController,
-            itemCount: _pages.length,
-            onPageChanged: (index) {
-              setState(() => _currentPage = index);
-            },
-            itemBuilder: (context, index) {
-              final page = _pages[index];
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 200),
-
-                  /// Título
-                  Text(
-                    page["title"]!,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                      fontSize: 30,
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF32384A),
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  /// Subtítulo
-                  if (page["subtitle"]!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 40),
-                      child: Text(
-                        page["subtitle"]!,
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w400,
-                          color: const Color(0xFF32384A),
-                        ),
-                      ),
-                    ),
-
-                  const SizedBox(height: 48),
-
-                  // <<< 5. CHAMADA DA FUNÇÃO ATUALIZADA >>>
-                  /// Imagem SVG
-                  _buildSvg(
-                    page["svg"]!,
-                    w: index == _pages.length - 1 ? 342 : 342,
-                    h: index == _pages.length - 1 ? 320 : 238,
-                  ),
-                ],
-              );
-            },
-          ),
-
-          /// Indicadores + Botão
-          Positioned(
-            bottom: 200,
-            left: 0,
-            right: 0,
+          /// Conteúdo
+          SafeArea(
             child: Column(
               children: [
-                /// Indicador
+                const Spacer(),
+
+                /// Páginas
+                Expanded(
+                  flex: 12,
+                  child: PageView.builder(
+                    controller: _pageController,
+                    itemCount: _pages.length,
+                    onPageChanged: (index) {
+                      setState(() => _currentPage = index);
+                    },
+                    physics: const BouncingScrollPhysics(),
+                    itemBuilder: (context, index) {
+                      final page = _pages[index];
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32.0,
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            /// Título
+                            Text(
+                              page["title"]!,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.poppins(
+                                fontSize: isSmallScreen ? 24 : 28,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF32384A),
+                              ),
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            /// Subtítulo
+                            if (page["subtitle"]!.isNotEmpty)
+                              Text(
+                                page["subtitle"]!,
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.poppins(
+                                  fontSize: isSmallScreen ? 14 : 16,
+                                  fontWeight: FontWeight.w400,
+                                  height: 1.4,
+                                  color: const Color(0xFF32384A),
+                                ),
+                              ),
+
+                            const SizedBox(height: 40),
+
+                            /// Ilustração
+                            Flexible(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxHeight: size.height * 0.35,
+                                ),
+                                child: _buildSvg(
+                                  page["svg"]!,
+                                  size.width - 64,
+                                  size.height * 0.35,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                const Spacer(),
+
+                /// Indicadores
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(_pages.length, (index) {
-                    return Container(
+                    final isActive = _currentPage == index;
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
                       margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: 8,
+                      width: isActive ? 16 : 8,
                       height: 8,
                       decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _currentPage == index
-                            ? const Color(0xFF607C3C)
-                            : Colors.white,
+                        color:
+                            isActive ? const Color(0xFF607C3C) : Colors.white,
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     );
                   }),
                 ),
 
-                const SizedBox(height: 40),
+                const SizedBox(height: 32),
 
                 /// Botão
-                SizedBox(
-                  width: 327,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _nextPage,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF607C3C),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(24),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _nextPage,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF607C3C),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        elevation: 4,
+                        shadowColor: Colors.black26,
                       ),
-                      elevation: 4,
-                      shadowColor: Colors.black26,
-                    ),
-                    child: _currentPage == _pages.length - 1
-                        ? Text(
-                            "Começar",
-                            style: GoogleFonts.poppins(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                "Próximo",
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
+                      child: _currentPage == _pages.length - 1
+                          ? Text(
+                              "Começar",
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  "Próximo",
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.arrow_forward,
                                   color: Colors.white,
                                 ),
-                              ),
-                              const Icon(Icons.arrow_forward, color: Colors.white),
-                            ],
-                          ),
+                              ],
+                            ),
+                    ),
                   ),
                 ),
+
+                const SizedBox(height: 32),
               ],
             ),
           ),

@@ -39,6 +39,14 @@ app.*.symbols
 # Obfuscation related
 app.*.map.json
 
+# Keys and Secrets
+chave_servidor
+chave_servidor.pub
+
+# Node dependencies
+node_modules/
+back/node_modules/
+
 # Android Studio will place build artifacts here
 /android/app/debug
 /android/app/profile

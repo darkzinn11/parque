@@ -3,7 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:go_router/go_router.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../data/models/map_focus.dart';
+import '../data/models/park.dart';
+import '../data/park_repository.dart';
+import '../core/api/api_config.dart';
+import '../widgets/favorite_button.dart';
 
 const kBrandGreen = Color(0xFF669340);
 const kDarkGray   = Color(0xFF32384A);
@@ -11,7 +21,6 @@ const kDarkGray   = Color(0xFF32384A);
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key, this.target});
 
-  /// Foco opcional vindo da rota (ParkDetail → Map)
   final MapFocus? target;
 
   @override
@@ -20,62 +29,126 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final Completer<GoogleMapController> _mapCtrl = Completer();
-  final PageController _page = PageController(viewportFraction: 0.78);
+  final PageController _page = PageController(viewportFraction: 0.52);
   int _current = 0;
+  bool _isLoading = true;
 
-  // Lugares (mock)
-  final List<_Place> _places = const [
-    _Place(
-      id: 'amor',
-      name: 'Parque do Rangedor',
-      latLng: LatLng(-2.4986319725913995, -44.26185574953524),
-      image: 'assets/images/RANGEDOR.png',
-    ),
-    _Place(
-      id: 'nasc',
-      name: 'Praça das Nascentes',
-      latLng: LatLng(-2.5241604530499973, -44.20572731508873),
-      image: 'assets/images/itapiraco.png',
-    ),
-    _Place(
-      id: 'rangedor',
-      name: 'Parque do Rangedor',
-      latLng: LatLng(-2.4986319725913995, -44.26185574953524),
-      image: 'assets/images/RANGEDOR.png',
-    ),
-  ];
-
-  Set<Marker> _markers = const <Marker>{};
+  List<Park> _parks = [];
+  Set<Marker> _markers = {};
+  Position? _userPosition;
 
   static const _initial = CameraPosition(
-    target: LatLng(-2.5269, -44.2477), // centro aprox
-    zoom: 15.2,
-    tilt: 0,
-    bearing: 0,
+    target: LatLng(-2.5269, -44.2477),
+    zoom: 13.5,
   );
 
   @override
   void initState() {
     super.initState();
-
-    _markers = _places
-        .map(
-          (p) => Marker(
-            markerId: MarkerId(p.id),
-            position: p.latLng,
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-            onTap: () => _jumpToPlace(p),
-          ),
-        )
-        .toSet();
+    _loadParks();
+    _loadUserLocation();
 
     _page.addListener(() {
       final newPage = _page.page?.round() ?? 0;
-      if (newPage != _current) {
+      if (newPage != _current && newPage < _parks.length) {
         setState(() => _current = newPage);
-        _animateMapTo(_places[newPage].latLng);
+        final p = _parks[newPage];
+        if (p.latitude != null && p.longitude != null) {
+          _animateMapTo(LatLng(p.latitude!, p.longitude!));
+        }
       }
     });
+  }
+
+  Future<void> _loadUserLocation() async {
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.low),
+      );
+      if (mounted) {
+        setState(() {
+          _userPosition = pos;
+          _sortByDistance();
+        });
+      }
+    } catch (_) {
+      // Sem localização — omite badge silenciosamente
+    }
+  }
+
+  void _sortByDistance() {
+    if (_userPosition == null || _parks.isEmpty) return;
+    _parks.sort((a, b) {
+      final da = Geolocator.distanceBetween(
+        _userPosition!.latitude, _userPosition!.longitude,
+        a.latitude!, a.longitude!,
+      );
+      final db = Geolocator.distanceBetween(
+        _userPosition!.latitude, _userPosition!.longitude,
+        b.latitude!, b.longitude!,
+      );
+      return da.compareTo(db);
+    });
+    _current = 0;
+    if (_page.hasClients) {
+      _page.jumpToPage(0);
+    }
+  }
+
+  String? _formatDistance(Park p) {
+    if (_userPosition == null || p.latitude == null || p.longitude == null) {
+      return null;
+    }
+    final meters = Geolocator.distanceBetween(
+      _userPosition!.latitude,
+      _userPosition!.longitude,
+      p.latitude!,
+      p.longitude!,
+    );
+    final km = meters / 1000;
+    if (km < 10) {
+      return '${km.toStringAsFixed(1).replaceAll('.', ',')} km';
+    }
+    return '${km.round()} km';
+  }
+
+  Future<void> _loadParks() async {
+    try {
+      final repo = context.read<ParkRepository>();
+      final parks = await repo.fetchAll();
+
+      final parksWithCoords = parks.where((p) => p.latitude != null && p.longitude != null).toList();
+
+      if (mounted) {
+        setState(() {
+          _parks = parksWithCoords;
+          _sortByDistance();
+          _isLoading = false;
+          _markers = _parks.map((p) => Marker(
+            markerId: MarkerId(p.id.toString()),
+            position: LatLng(p.latitude!, p.longitude!),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+            onTap: () => _selectPark(p),
+          )).toSet();
+        });
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _applyTargetFocus();
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Erro ao carregar parques no mapa: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -84,7 +157,20 @@ class _MapScreenState extends State<MapScreen> {
     super.dispose();
   }
 
-  Future<void> _animateMapTo(LatLng target, {double zoom = 16.0}) async {
+  String? _toImageUrl(String? path) {
+    if (path == null || path.isEmpty) return null;
+    if (path.startsWith('http')) {
+      if (path.contains('apps.sitw.com.br') && !path.contains('/backend-park/')) {
+        return path.replaceFirst('apps.sitw.com.br/', 'apps.sitw.com.br/backend-park/');
+      }
+      return path;
+    }
+    final baseUrl = ApiConfig.baseUrl.replaceAll('/api/v1', '');
+    final cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    return '$baseUrl/$cleanPath';
+  }
+
+  Future<void> _animateMapTo(LatLng target, {double zoom = 15.5}) async {
     final ctrl = await _mapCtrl.future;
     await ctrl.animateCamera(
       CameraUpdate.newCameraPosition(
@@ -93,53 +179,78 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  void _jumpToPlace(_Place p) {
-    final idx = _places.indexWhere((e) => e.id == p.id);
+  void _jumpToPark(Park p) {
+    final idx = _parks.indexWhere((e) => e.id == p.id);
     if (idx != -1) {
       _page.animateToPage(
         idx,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
       );
     }
   }
 
-  /// Cria/atualiza o marcador de foco (verde) e centraliza o mapa
-  Future<void> _focusOn(LatLng pos, {String? title}) async {
-    setState(() {
-      _markers = {
-        ..._markers.where((m) => m.markerId.value != 'focus'),
-        Marker(
-          markerId: const MarkerId('focus'),
-          position: pos,
-          infoWindow: title != null ? InfoWindow(title: title) : const InfoWindow(),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        ),
-      };
-    });
-    await _animateMapTo(pos);
+  void _selectPark(Park p) {
+    _jumpToPark(p);
+    if (p.latitude != null && p.longitude != null) {
+      _animateMapTo(LatLng(p.latitude!, p.longitude!));
+    }
+    _showParkSheet(p);
   }
 
-  /// Aplica o foco vindo do ParkDetail (se existir)
   Future<void> _applyTargetFocus() async {
     final t = widget.target;
     if (t == null) return;
 
-    // 1) Se veio lat/lng do Directus, foca direto nelas
     if (t.lat != null && t.lng != null) {
-      await _focusOn(LatLng(t.lat!, t.lng!), title: t.name);
-      return;
-    }
+      final pos = LatLng(t.lat!, t.lng!);
+      await _animateMapTo(pos, zoom: 16.5);
 
-    // 2) Sem lat/lng? tenta casar pelo nome nos mocks
-    final byName = _places.indexWhere(
-      (p) => p.name.toLowerCase().trim() == t.name.toLowerCase().trim(),
-    );
-    if (byName != -1) {
-      final p = _places[byName];
-      _jumpToPlace(p);
-      await _focusOn(p.latLng, title: p.name);
+      setState(() {
+        _markers.add(Marker(
+          markerId: const MarkerId('focus'),
+          position: pos,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(title: t.name),
+        ));
+      });
     }
+  }
+
+  void _showParkSheet(Park p) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: false,
+      builder: (_) => _ParkBottomSheet(
+        park: p,
+        imageUrl: _toImageUrl(p.heroImage),
+        distance: _formatDistance(p),
+        onRoutes: () {
+          Navigator.pop(context);
+          _showRoutePicker(p);
+        },
+        onDetails: () {
+          Navigator.pop(context);
+          context.push('/parks/${p.documentId}');
+        },
+      ),
+    );
+  }
+
+  void _showRoutePicker(Park p) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _RoutePickerSheet(
+        lat: p.latitude!,
+        lng: p.longitude!,
+        parkName: p.name,
+      ),
+    );
   }
 
   @override
@@ -149,83 +260,118 @@ class _MapScreenState extends State<MapScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // Google Map
           GoogleMap(
             initialCameraPosition: _initial,
-            onMapCreated: (c) async {
+            onMapCreated: (c) {
               if (!_mapCtrl.isCompleted) _mapCtrl.complete(c);
-              // aplica o foco quando o mapa estiver pronto
-              await _applyTargetFocus();
             },
             markers: _markers,
+            myLocationEnabled: true,
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
             compassEnabled: false,
           ),
 
-          // Barra de busca flutuante
+          // Search Bar
           Positioned(
             top: topPadding + 12,
-            left: 20,
-            right: 20,
-            child: _SearchPill(
-              hint: 'Buscar local...',
-              onTap: () async {
-                final picked = await showSearch<_Place?>(
-                  context: context,
-                  delegate: PlaceSearchDelegate(
-                    places: _places,
-                    hintText: 'Busque um local...',
-                  ),
-                );
-                if (picked != null) {
-                  _jumpToPlace(picked);
-                  await _focusOn(picked.latLng, title: picked.name);
-                }
-              },
-            ),
-          ),
-
-          // Carrossel inferior
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 18 + MediaQuery.of(context).padding.bottom,
+            left: (MediaQuery.of(context).size.width - 334) / 2,
             child: SizedBox(
-              height: 156,
-              child: PageView.builder(
-                controller: _page,
-                itemCount: _places.length,
-                padEnds: false,
-                itemBuilder: (_, i) {
-                  final p = _places[i];
-                  final selected = i == _current;
-                  return Padding(
-                    padding: EdgeInsets.only(
-                      left: i == 0 ? 20 : 12,
-                      right: i == _places.length - 1 ? 20 : 0,
+              width: 334,
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      } else {
+                        try {
+                          context.go('/tabs/home');
+                        } catch (_) {}
+                      }
+                    },
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: const BoxDecoration(
+                        color: kBrandGreen,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.chevron_left,
+                          color: Colors.white,
+                          size: 26,
+                        ),
+                      ),
                     ),
-                    child: _PlaceCard(
-                      place: p,
-                      selected: selected,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _SearchPill(
+                      hint: 'Buscar local...',
                       onTap: () async {
-                        _jumpToPlace(p);
-                        await _focusOn(p.latLng, title: p.name);
+                        final picked = await Navigator.of(context).push<Park?>(
+                          PageRouteBuilder(
+                            pageBuilder: (_, __, ___) => _ParkSearchScreen(
+                              parks: _parks,
+                              userPosition: _userPosition,
+                              toImageUrl: _toImageUrl,
+                            ),
+                            transitionsBuilder: (_, anim, __, child) =>
+                                FadeTransition(opacity: anim, child: child),
+                            transitionDuration: const Duration(milliseconds: 180),
+                          ),
+                        );
+                        if (picked != null && mounted) {
+                          _selectPark(picked);
+                        }
                       },
                     ),
-                  );
-                },
+                  ),
+                ],
               ),
             ),
           ),
+
+          // Carousel
+          if (!_isLoading && _parks.isNotEmpty)
+            Positioned(
+              left: 20,
+              right: 0,
+              bottom: 24 + MediaQuery.of(context).padding.bottom,
+              child: SizedBox(
+                height: 190,
+                child: PageView.builder(
+                  controller: _page,
+                  padEnds: false,
+                  clipBehavior: Clip.none,
+                  itemCount: _parks.length,
+                  itemBuilder: (_, i) {
+                    final p = _parks[i];
+                    final selected = i == _current;
+                    return _ParkMapCard(
+                      park: p,
+                      selected: selected,
+                      imageUrl: _toImageUrl(p.heroImage),
+                      distance: _formatDistance(p),
+                      onTap: () => _selectPark(p),
+                    );
+                  },
+                ),
+              ),
+            ),
+
+          if (_isLoading)
+            const Center(child: CircularProgressIndicator(color: kBrandGreen)),
         ],
       ),
     );
   }
 }
 
-/* ------------------------ UI helpers ------------------------ */
+// ── Search Pill ───────────────────────────────────────────────────────────────
 
 class _SearchPill extends StatelessWidget {
   const _SearchPill({required this.hint, this.onTap});
@@ -236,38 +382,54 @@ class _SearchPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        height: 40,
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(26),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: kBrandGreen, width: 2.0),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(.08),
-              blurRadius: 10,
-              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: .06),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
             ),
           ],
-          border: Border.all(color: kBrandGreen, width: 1.4),
         ),
-        child: Row(
+        child: Stack(
+          alignment: Alignment.centerLeft,
           children: [
-            const Icon(Icons.search, color: kBrandGreen),
-            const SizedBox(width: 10),
-            Expanded(
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 50),
               child: Text(
                 hint,
                 style: GoogleFonts.poppins(
-                  color: kDarkGray.withOpacity(.6),
+                  color: kDarkGray.withValues(alpha: .6),
                   fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ),
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: kBrandGreen,
-              child: const Icon(Icons.search, color: Colors.white, size: 18),
+            Positioned(
+              right: -2,
+              top: -2,
+              bottom: -2,
+              child: Container(
+                width: 40,
+                decoration: const BoxDecoration(
+                  color: kBrandGreen,
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.search,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -276,74 +438,115 @@ class _SearchPill extends StatelessWidget {
   }
 }
 
-class _PlaceCard extends StatelessWidget {
-  const _PlaceCard({
-    required this.place,
+// ── Card do carousel ──────────────────────────────────────────────────────────
+
+class _ParkMapCard extends StatelessWidget {
+  const _ParkMapCard({
+    required this.park,
     required this.selected,
+    required this.imageUrl,
     required this.onTap,
+    this.distance,
   });
 
-  final _Place place;
+  final Park park;
   final bool selected;
+  final String? imageUrl;
   final VoidCallback onTap;
+  final String? distance;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedScale(
       scale: selected ? 1.0 : 0.96,
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 250),
       curve: Curves.easeOut,
-      child: InkWell(
+      child: GestureDetector(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
         child: Container(
-          width: 260,
+          width: 181,
+          height: 181,
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(.10),
-                blurRadius: 12,
-                offset: const Offset(0, 6),
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // imagem
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-                child: Image.asset(
-                  place.image,
-                  height: 96,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const ColoredBox(
-                    color: Color(0xFFEFEFEF),
-                    child: SizedBox(height: 96, width: double.infinity),
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: SizedBox(
+                      height: 105,
+                      width: double.infinity,
+                      child: imageUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: imageUrl!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) => Container(color: Colors.grey[200]),
+                            errorWidget: (_, __, ___) => Container(
+                              color: Colors.grey[200],
+                              child: const Icon(Icons.image_not_supported, color: Colors.grey),
+                            ),
+                          )
+                        : Container(color: Colors.grey[200]),
+                    ),
                   ),
-                ),
-              ),
-              // título
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        place.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w700,
-                          color: kDarkGray,
+                  Positioned(
+                    right: 8,
+                    top: 8,
+                    child: FavoriteButton(
+                      parkDocumentId: park.documentId,
+                      size: 28,
+                    ),
+                  ),
+                  if (distance != null)
+                    Positioned(
+                      bottom: 6,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          distance!,
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: kDarkGray,
+                          ),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.arrow_forward_rounded, color: kBrandGreen),
-                  ],
+                ],
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Text(
+                    park.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: kDarkGray,
+                      height: 1.2,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -354,95 +557,504 @@ class _PlaceCard extends StatelessWidget {
   }
 }
 
-class _Place {
-  final String id;
-  final String name;
-  final LatLng latLng;
-  final String image;
-  const _Place({
-    required this.id,
-    required this.name,
-    required this.latLng,
-    required this.image,
+// ── Bottom sheet do parque ────────────────────────────────────────────────────
+
+class _ParkBottomSheet extends StatelessWidget {
+  const _ParkBottomSheet({
+    required this.park,
+    required this.onRoutes,
+    required this.onDetails,
+    this.imageUrl,
+    this.distance,
   });
+
+  final Park park;
+  final String? imageUrl;
+  final String? distance;
+  final VoidCallback onRoutes;
+  final VoidCallback onDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (imageUrl != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                height: 140,
+                width: double.infinity,
+                child: CachedNetworkImage(
+                  imageUrl: imageUrl!,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(color: Colors.grey.shade200),
+                  errorWidget: (_, __, ___) => Container(
+                    color: Colors.grey.shade200,
+                    child: const Icon(Icons.park, color: kBrandGreen, size: 40),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  park.name,
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: kBrandGreen,
+                  ),
+                ),
+              ),
+              if (park.rating != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5EFE2),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.star, size: 14, color: kBrandGreen),
+                      const SizedBox(width: 4),
+                      Text(
+                        park.rating!.toStringAsFixed(1),
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              if (park.status != null) ...[
+                const Icon(Icons.circle, size: 8, color: Color(0xFF389600)),
+                const SizedBox(width: 5),
+                Text(
+                  park.status!,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    color: kBrandGreen,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+              if (park.status != null && distance != null)
+                Text(
+                  '  ·  ',
+                  style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey),
+                ),
+              if (distance != null)
+                Text(
+                  distance!,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    color: kDarkGray.withValues(alpha: 0.6),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: kBrandGreen, width: 1.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  onPressed: onRoutes,
+                  icon: const Icon(Icons.directions_outlined, color: kBrandGreen, size: 20),
+                  label: Text(
+                    'Rotas',
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: kBrandGreen,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kBrandGreen,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  onPressed: onDetails,
+                  child: Text(
+                    'Ver detalhes',
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-/* ------------------------ SearchDelegate ------------------------ */
+// ── Picker de apps de rota ────────────────────────────────────────────────────
 
-class PlaceSearchDelegate extends SearchDelegate<_Place?> {
-  PlaceSearchDelegate({
-    required this.places,
-    this.hintText = 'Buscar',
-  }) {
-    query = ''; // valor inicial (opcional)
+class _RoutePickerSheet extends StatefulWidget {
+  const _RoutePickerSheet({
+    required this.lat,
+    required this.lng,
+    required this.parkName,
+  });
+
+  final double lat;
+  final double lng;
+  final String parkName;
+
+  @override
+  State<_RoutePickerSheet> createState() => _RoutePickerSheetState();
+}
+
+class _RoutePickerSheetState extends State<_RoutePickerSheet> {
+  final List<_NavApp> _available = [];
+  bool _checking = true;
+
+  static final _apps = [
+    _NavApp(
+      name: 'Waze',
+      icon: '🚗',
+      url: (lat, lng) => 'waze://ul?ll=$lat,$lng&navigate=yes',
+    ),
+    _NavApp(
+      name: 'Google Maps',
+      icon: '🗺️',
+      url: (lat, lng) => 'google.navigation:q=$lat,$lng',
+    ),
+    _NavApp(
+      name: 'Apple Maps',
+      icon: '🗾',
+      url: (lat, lng) => 'maps://maps.apple.com/?daddr=$lat,$lng',
+      iosOnly: true,
+    ),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _checkApps();
   }
 
-  final List<_Place> places;
-  final String hintText;
-
-  @override
-  String get searchFieldLabel => hintText;
-
-  @override
-  TextStyle? get searchFieldStyle =>
-      GoogleFonts.poppins(color: kDarkGray, fontSize: 16);
-
-  @override
-  List<Widget>? buildActions(BuildContext context) => [
-        if (query.isNotEmpty)
-          IconButton(
-            icon: const Icon(Icons.clear),
-            onPressed: () => query = '',
-          ),
-      ];
-
-  @override
-  Widget? buildLeading(BuildContext context) => IconButton(
-        icon: const Icon(Icons.arrow_back),
-        onPressed: () => close(context, null),
-      );
-
-  @override
-  Widget buildResults(BuildContext context) => _buildList(context);
-
-  @override
-  Widget buildSuggestions(BuildContext context) => _buildList(context);
-
-  Widget _buildList(BuildContext context) {
-    final q = query.trim().toLowerCase();
-    final filtered = q.isEmpty
-        ? places
-        : places.where((p) => p.name.toLowerCase().contains(q)).toList();
-
-    if (filtered.isEmpty) {
-      return Center(
-        child: Text(
-          'Nenhum resultado',
-          style: GoogleFonts.poppins(color: kDarkGray.withOpacity(.6)),
-        ),
-      );
+  Future<void> _checkApps() async {
+    final isIos = Theme.of(context).platform == TargetPlatform.iOS;
+    for (final app in _apps) {
+      if (app.iosOnly && !isIos) continue;
+      final uri = Uri.parse(app.url(widget.lat, widget.lng));
+      if (await canLaunchUrl(uri)) {
+        _available.add(app);
+      }
     }
 
-    return ListView.separated(
-      itemCount: filtered.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (_, i) {
-        final p = filtered[i];
-        return ListTile(
-          leading: const Icon(Icons.place, color: kBrandGreen),
-          title: Text(
-            p.name,
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
+    if (_available.isEmpty) {
+      _available.add(_NavApp(
+        name: 'Abrir no browser',
+        icon: '🌐',
+        url: (lat, lng) =>
+            'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng',
+      ));
+    }
+
+    if (mounted) setState(() => _checking = false);
+  }
+
+  Future<void> _launch(_NavApp app) async {
+    final uri = Uri.parse(app.url(widget.lat, widget.lng));
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Como quer ir?',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: kDarkGray,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              widget.parkName,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: kDarkGray.withValues(alpha: 0.5),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_checking)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(child: CircularProgressIndicator(color: kBrandGreen)),
+              )
+            else
+              ..._available.map(
+                (app) => ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  leading: Text(app.icon, style: const TextStyle(fontSize: 28)),
+                  title: Text(
+                    app.name,
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: kDarkGray,
+                    ),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, color: kBrandGreen),
+                  onTap: () => _launch(app),
+                ),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NavApp {
+  const _NavApp({
+    required this.name,
+    required this.icon,
+    required this.url,
+    this.iosOnly = false,
+  });
+
+  final String name;
+  final String icon;
+  final String Function(double lat, double lng) url;
+  final bool iosOnly;
+}
+
+// ── Tela de busca customizada ─────────────────────────────────────────────────
+
+class _ParkSearchScreen extends StatefulWidget {
+  const _ParkSearchScreen({
+    required this.parks,
+    required this.toImageUrl,
+    this.userPosition,
+  });
+
+  final List<Park> parks;
+  final Position? userPosition;
+  final String? Function(String?) toImageUrl;
+
+  @override
+  State<_ParkSearchScreen> createState() => _ParkSearchScreenState();
+}
+
+class _ParkSearchScreenState extends State<_ParkSearchScreen> {
+  final _controller = TextEditingController();
+  List<Park> _results = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _results = widget.parks;
+    _controller.addListener(_filter);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _filter() {
+    final q = _controller.text.toLowerCase();
+    setState(() {
+      _results = widget.parks
+          .where((p) => p.name.toLowerCase().contains(q))
+          .toList();
+    });
+  }
+
+  String? _formatDistance(Park p) {
+    final pos = widget.userPosition;
+    if (pos == null || p.latitude == null || p.longitude == null) return null;
+    final meters = Geolocator.distanceBetween(
+      pos.latitude, pos.longitude, p.latitude!, p.longitude!,
+    );
+    final km = meters / 1000;
+    return km < 10
+        ? '${km.toStringAsFixed(1).replaceAll('.', ',')} km'
+        : '${km.round()} km';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: kBrandGreen),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: TextField(
+          controller: _controller,
+          autofocus: true,
+          style: GoogleFonts.poppins(fontSize: 15, color: kDarkGray),
+          decoration: InputDecoration(
+            hintText: 'Busque um parque...',
+            hintStyle: GoogleFonts.poppins(
+              fontSize: 15,
+              color: kDarkGray.withValues(alpha: 0.4),
+            ),
+            border: InputBorder.none,
           ),
-          subtitle: Text(
-            '${p.latLng.latitude.toStringAsFixed(4)}, '
-            '${p.latLng.longitude.toStringAsFixed(4)}',
-            style: GoogleFonts.poppins(color: kDarkGray.withOpacity(.6)),
-          ),
-          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-          onTap: () => close(context, p),
-        );
-      },
+        ),
+        actions: [
+          if (_controller.text.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.close, color: kBrandGreen),
+              onPressed: () => _controller.clear(),
+            ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: const Color(0xFFE6E6E6)),
+        ),
+      ),
+      body: _results.isEmpty
+          ? Center(
+              child: Text(
+                'Nenhum parque encontrado',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: kDarkGray.withValues(alpha: 0.4),
+                ),
+              ),
+            )
+          : ListView.separated(
+              itemCount: _results.length,
+              separatorBuilder: (_, __) => const Divider(
+                height: 1,
+                indent: 76,
+                color: Color(0xFFF0F0F0),
+              ),
+              itemBuilder: (context, i) {
+                final p = _results[i];
+                final imageUrl = widget.toImageUrl(p.heroImage);
+                final distance = _formatDistance(p);
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 52,
+                      height: 52,
+                      child: imageUrl != null
+                          ? CachedNetworkImage(
+                              imageUrl: imageUrl,
+                              fit: BoxFit.cover,
+                              placeholder: (_, __) =>
+                                  Container(color: const Color(0xFFE5EFE2)),
+                              errorWidget: (_, __, ___) => Container(
+                                color: const Color(0xFFE5EFE2),
+                                child: const Icon(Icons.park,
+                                    color: kBrandGreen, size: 24),
+                              ),
+                            )
+                          : Container(
+                              color: const Color(0xFFE5EFE2),
+                              child: const Icon(Icons.park,
+                                  color: kBrandGreen, size: 24),
+                            ),
+                    ),
+                  ),
+                  title: Text(
+                    p.name,
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: kDarkGray,
+                    ),
+                  ),
+                  subtitle: distance != null
+                      ? Text(
+                          distance,
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            color: kBrandGreen,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        )
+                      : null,
+                  trailing: const Icon(Icons.chevron_right, color: kBrandGreen),
+                  onTap: () => Navigator.pop(context, p),
+                );
+              },
+            ),
     );
   }
 }

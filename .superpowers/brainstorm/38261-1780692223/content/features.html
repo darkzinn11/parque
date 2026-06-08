@@ -1,0 +1,278 @@
+<h2>Quais recursos incluir?</h2>
+<p class="subtitle">Selecione quantos quiser. Podemos implementar tudo ou só o essencial.</p>
+
+<style>
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    max-width: 640px;
+    margin: 24px auto;
+  }
+  .feat-card {
+    background: white;
+    border: 2px solid #e0e0e0;
+    border-radius: 16px;
+    padding: 16px;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .feat-card:hover {
+    border-color: #669340;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102,147,64,0.15);
+  }
+  .feat-card.selected-feat {
+    border-color: #669340;
+    background: #f4f9f0;
+    box-shadow: 0 4px 16px rgba(102,147,64,0.2);
+  }
+  .feat-preview {
+    height: 100px;
+    background: #f0f5ec;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .feat-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #32384A;
+  }
+  .feat-desc {
+    font-size: 11px;
+    color: #888;
+    line-height: 1.4;
+    margin-top: -6px;
+  }
+  .badge-rec {
+    display: inline-block;
+    background: #669340;
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 20px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  /* Mockup: filtros chips */
+  .chip-row {
+    display: flex;
+    gap: 5px;
+    padding: 8px 10px;
+    background: white;
+    border-radius: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .chip {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 9px;
+    font-weight: 700;
+    background: #f0f5ec;
+    color: #669340;
+    border: 1.5px solid #669340;
+  }
+  .chip.active {
+    background: #669340;
+    color: white;
+  }
+
+  /* Mockup: botão localização */
+  .loc-mockup {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+  .map-mini {
+    width: 100%;
+    height: 100%;
+    background:
+      repeating-linear-gradient(0deg, transparent, transparent 12px, rgba(200,220,200,0.4) 12px, rgba(200,220,200,0.4) 13px),
+      repeating-linear-gradient(90deg, transparent, transparent 12px, rgba(200,220,200,0.4) 12px, rgba(200,220,200,0.4) 13px),
+      #dceedd;
+  }
+  .fab-loc {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    width: 36px;
+    height: 36px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+  .user-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 12px;
+    height: 12px;
+    background: #4285F4;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 0 0 4px rgba(66,133,244,0.2);
+    transform: translate(-50%,-50%);
+  }
+
+  /* Mockup: distância nos cards */
+  .dist-card {
+    background: white;
+    border-radius: 10px;
+    padding: 7px 9px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin: 4px 10px;
+  }
+  .dist-img {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #a8d080, #669340);
+    border-radius: 7px;
+    flex-shrink: 0;
+  }
+  .dist-badge {
+    background: #f0f5ec;
+    color: #669340;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+
+  /* Mockup: pins verdes */
+  .pins-mockup {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    height: 100%;
+  }
+  .pin-demo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .pin-label { font-size: 9px; color: #888; }
+  .pin-svg { width: 24px; height: 32px; }
+</style>
+
+<div class="feature-grid">
+
+  <!-- Filtros por categoria -->
+  <div class="feat-card" id="feat-filters" onclick="toggleFeat('filters', this)">
+    <div class="feat-preview">
+      <div style="width:100%;padding:8px">
+        <div class="chip-row">
+          <div class="chip active">Todos</div>
+          <div class="chip">⚽ Esporte</div>
+          <div class="chip">🌳 Natureza</div>
+          <div class="chip">🎠 Infantil</div>
+        </div>
+      </div>
+    </div>
+    <div class="feat-title">Filtros por categoria <span class="badge-rec">recomendado</span></div>
+    <div class="feat-desc">Chips horizontais para filtrar parques por tipo. Mapa e carousel atualizam em tempo real.</div>
+  </div>
+
+  <!-- Botão localização -->
+  <div class="feat-card" id="feat-location" onclick="toggleFeat('location', this)">
+    <div class="feat-preview">
+      <div class="loc-mockup">
+        <div class="map-mini"></div>
+        <div class="user-dot"></div>
+        <div class="fab-loc">📍</div>
+      </div>
+    </div>
+    <div class="feat-title">Botão "Minha localização" <span class="badge-rec">recomendado</span></div>
+    <div class="feat-desc">FAB que centraliza o mapa na posição atual do usuário.</div>
+  </div>
+
+  <!-- Distância nos cards -->
+  <div class="feat-card" id="feat-distance" onclick="toggleFeat('distance', this)">
+    <div class="feat-preview" style="flex-direction:column;justify-content:center;gap:5px">
+      <div class="dist-card">
+        <div class="dist-img"></div>
+        <div style="flex:1">
+          <div style="font-size:9px;font-weight:700;color:#32384A">Parque do Rangedor</div>
+          <div style="font-size:8px;color:#888">⭐ 4.8</div>
+        </div>
+        <div class="dist-badge">1.2 km</div>
+      </div>
+      <div class="dist-card" style="opacity:0.6">
+        <div class="dist-img"></div>
+        <div style="flex:1">
+          <div style="font-size:9px;font-weight:700;color:#32384A">Sítio do Rangedor</div>
+          <div style="font-size:8px;color:#888">⭐ 4.5</div>
+        </div>
+        <div class="dist-badge">3.8 km</div>
+      </div>
+    </div>
+    <div class="feat-title">Distância no card</div>
+    <div class="feat-desc">Mostra distância do usuário até cada parque nos cards do carousel e no bottom sheet.</div>
+  </div>
+
+  <!-- Pins verdes com ícone -->
+  <div class="feat-card" id="feat-pins" onclick="toggleFeat('pins', this)">
+    <div class="feat-preview">
+      <div class="pins-mockup">
+        <div class="pin-demo">
+          <svg class="pin-svg" viewBox="0 0 24 32">
+            <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20S24 21 24 12C24 5.4 18.6 0 12 0z" fill="#E53935"/>
+            <circle cx="12" cy="12" r="5" fill="white"/>
+          </svg>
+          <div class="pin-label">Atual</div>
+        </div>
+        <div style="font-size:18px;color:#ccc">→</div>
+        <div class="pin-demo">
+          <svg class="pin-svg" viewBox="0 0 24 32">
+            <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20S24 21 24 12C24 5.4 18.6 0 12 0z" fill="#669340"/>
+            <circle cx="12" cy="12" r="5" fill="white"/>
+          </svg>
+          <div class="pin-label">Verde</div>
+        </div>
+        <div class="pin-demo" style="margin-left:4px">
+          <div style="width:24px;height:28px;background:#669340;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center">
+            <div style="transform:rotate(45deg);font-size:11px">🌳</div>
+          </div>
+          <div class="pin-label">Com ícone</div>
+        </div>
+      </div>
+    </div>
+    <div class="feat-title">Pins verdes com ícone</div>
+    <div class="feat-desc">Troca os pins vermelhos padrão por pins verdes da marca, com ícone de árvore.</div>
+  </div>
+
+</div>
+
+<script>
+  const selected = new Set();
+  function toggleFeat(key, el) {
+    if (selected.has(key)) {
+      selected.delete(key);
+      el.classList.remove('selected-feat');
+    } else {
+      selected.add(key);
+      el.classList.add('selected-feat');
+    }
+    // record as browser event
+    const choice = Array.from(selected).join(',') || 'none';
+    if (window.recordEvent) recordEvent('multiselect', choice, Array.from(selected).join(', '));
+  }
+</script>

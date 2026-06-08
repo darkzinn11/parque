@@ -1,26 +1,31 @@
 // lib/services/favorites_service.dart
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-
+import '../core/api/api_client.dart';
 import 'auth_service.dart';
-
-const String kApiBase = 'http://192.168.15.12:1337/api';
 
 class FavoritesService extends ChangeNotifier {
   // Singleton
   static final FavoritesService instance = FavoritesService._();
   FavoritesService._();
 
+  final _api = ApiClient();
+
   /// Conjunto com os documentIds dos parques favoritados
   final Set<String> _docIds = {};
+
+  /// IDs com toggle em andamento — evita double-tap corrompendo estado
+  final Set<String> _pending = {};
+
   List<String> get parkDocumentIds => _docIds.toList(growable: false);
   bool isFavoriteByDoc(String documentId) => _docIds.contains(documentId);
+  bool isPending(String documentId) => _pending.contains(documentId);
 
   /// Inicializa: carrega favoritos do usuário autenticado
   Future<void> init() async {
-    final token = await AuthService.instance.token();
-    final me = await AuthService.instance.me();
+    // Usa o cache síncrono — evita HTTP extra só para verificar auth
+    final token = AuthService.instance.tokenSync;
+    final me = AuthService.instance.currentUser;
 
     _docIds.clear();
 
@@ -29,93 +34,62 @@ class FavoritesService extends ChangeNotifier {
       return;
     }
 
-    await _loadFromServer(token);
+    await _loadFromServer();
   }
 
-  /// Carrega usando a rota custom /favorites/mine (sem filtros na query)
-  Future<void> _loadFromServer(String token) async {
-    // 1) tenta /favorites/mine
-    final uMine = Uri.parse('$kApiBase/favorites/mine');
+  Future<void> _loadFromServer() async {
     try {
-      final r1 = await http.get(uMine, headers: {'Authorization': 'Bearer $token'});
-      if (r1.statusCode == 200) {
-        _parseMineResponse(r1.body);
-        notifyListeners();
-        return;
-      } else {
-        if (kDebugMode) print('❌ FAV LOAD (mine ${r1.statusCode}): ${r1.body}');
-      }
-    } catch (e) {
-      if (kDebugMode) print('❌ FAV LOAD (mine) network: $e');
-    }
-
-    // 2) fallback (O seu código de fallback)
-    try {
-      final me = await AuthService.instance.me();
-      final meId = me?['id'];
-      if (meId == null) return;
-
-      final u = Uri.parse('$kApiBase/favorites').replace(queryParameters: {
-        'populate': 'park',
-        'filters[user][id][\$eq]': '$meId',
-        'pagination[pageSize]': '100',
-      });
-
-      final r2 = await http.get(u, headers: {'Authorization': 'Bearer $token'});
-      if (r2.statusCode == 200) {
-        // Usa o mesmo parser corrigido
-        _parseMineResponse(r2.body);
+      final r = await _api.get('/favorites/mine');
+      if (r.statusCode == 200) {
+        _parseMineResponse(r.body);
         notifyListeners();
       } else {
-        if (kDebugMode) print('❌ FAV LOAD (fallback ${r2.statusCode}): ${r2.body}');
+        if (kDebugMode) print('❌ FAV LOAD (${r.statusCode}): ${r.body}');
       }
     } catch (e) {
-      if (kDebugMode) print('❌ FAV LOAD (fallback) network: $e');
+      if (kDebugMode) print('❌ FAV LOAD network: $e');
     }
   }
 
-  /// Parser robusto para /favorites/mine (transformResponse do Strapi v5)
   void _parseMineResponse(String body) {
-    _docIds.clear();
     try {
       final jsonMap = jsonDecode(body);
       final List data = (jsonMap['data'] ?? []) as List;
 
+      // Só limpa depois de confirmar que o parse foi bem-sucedido
+      final newIds = <String>{};
       for (final item in data) {
         if (item is! Map) continue;
-
-        // --- CORREÇÃO AQUI ---
-        // O seu controller (favorite.ts) retorna a lista de favoritos
-        // E o 'transformResponse' remove o 'attributes' do *favorito*,
-        // mas não do 'park' que está dentro dele.
-        
-        // 1. Acessa o objeto 'park' (que foi populado)
-        // (O 'item' não tem 'attributes' por causa do transformResponse)
         final parkData = item['park'] as Map<String, dynamic>?;
-        
-        // 2. Acessa o 'documentId' dentro do 'park'
         if (parkData != null) {
           final docId = parkData['documentId'] as String?;
           if (docId != null && docId.isNotEmpty) {
-            _docIds.add(docId);
-            print('✅ FAV PARSE: Encontrado park $docId'); // Log de sucesso
+            newIds.add(docId);
           }
         }
-        // --- FIM DA CORREÇÃO ---
       }
+
+      _docIds
+        ..clear()
+        ..addAll(newIds);
     } catch (e) {
       if (kDebugMode) print('❌ Erro no _parseMineResponse: $e');
+      // Não limpa _docIds — mantém estado anterior em caso de resposta inválida
     }
   }
 
-  /// Alterna favorito por **documentId** usando a rota custom do backend
+  /// Alterna favorito por **documentId**.
+  /// Retorna silenciosamente se já há uma requisição em andamento para o mesmo parque.
   Future<void> toggleByDocumentId(String parkDocumentId) async {
-    final token = await AuthService.instance.token();
-    if (token == null) return;
+    // Guard de race condition: ignora tap duplo enquanto a requisição estiver em voo
+    if (_pending.contains(parkDocumentId)) return;
+
+    if (AuthService.instance.tokenSync == null) return;
 
     final wasFav = _docIds.contains(parkDocumentId);
 
     // Atualização otimista
+    _pending.add(parkDocumentId);
     if (wasFav) {
       _docIds.remove(parkDocumentId);
     } else {
@@ -124,30 +98,32 @@ class FavoritesService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final res = await http.post(
-        Uri.parse('$kApiBase/favorites/toggle'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'parkDocumentId': parkDocumentId}),
+      final res = await _api.post(
+        '/favorites/toggle',
+        body: {'parkDocumentId': parkDocumentId},
       );
 
       if (res.statusCode != 200) {
-        // Reverte se falhar
-        if (wasFav) _docIds.add(parkDocumentId);
-        else _docIds.remove(parkDocumentId);
+        if (wasFav) {
+          _docIds.add(parkDocumentId);
+        } else {
+          _docIds.remove(parkDocumentId);
+        }
         notifyListeners();
         if (kDebugMode) print('❌ FAV TOGGLE (${res.statusCode}): ${res.body}');
-      } else {
-        if (kDebugMode) print('✅ FAV TOGGLE ok: ${res.body}');
       }
     } catch (e) {
       // Reverte em erro de rede
-      if (wasFav) _docIds.add(parkDocumentId);
-      else _docIds.remove(parkDocumentId);
+      if (wasFav) {
+        _docIds.add(parkDocumentId);
+      } else {
+        _docIds.remove(parkDocumentId);
+      }
       notifyListeners();
       if (kDebugMode) print('❌ FAV TOGGLE network: $e');
+    } finally {
+      _pending.remove(parkDocumentId);
+      notifyListeners(); // libera o isPending e reconstrói o botão
     }
   }
 }

@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'auth_service.dart';
+import '../core/api/api_client.dart';
+import '../core/api/api_config.dart';
 
 class SpaceItem {
   final String id;
@@ -17,7 +17,7 @@ class SpaceItem {
     required this.parkName,
   });
 
-  String? get coverUrl => imageId == null ? null : '$kApiBase/assets/$imageId';
+  String? get coverUrl => imageId == null ? null : '${ApiConfig.baseUrl}/assets/$imageId';
 
   factory SpaceItem.fromJson(Map<String, dynamic> j) {
     final img = j['image'];
@@ -38,41 +38,36 @@ class SpaceItem {
 }
 
 class SpacesService {
-  final _auth = AuthService.instance;
+  final _api = ApiClient();
 
   Future<List<SpaceItem>> list({String? category}) async {
-    final t = await _auth.token();
-    if (t == null) return [];
+    try {
+      final res = await _api.get('/map-points');
 
-    final filter = <String, dynamic>{
-      'visible': {'_eq': true},
-      if (category != null && category.isNotEmpty && category != 'Todos')
-        'type': {'_eq': category},
-    };
-
-    final uri = Uri.parse('$kApiBase/items/map_points').replace(queryParameters: {
-      'filter': jsonEncode(filter),
-      'fields': 'id,title,type,image.id,park.name',
-      'sort': 'title',
-      'limit': '100',
-    });
-
-    final res = await http.get(uri, headers: {'Authorization': 'Bearer $t'});
-    if (res.statusCode != 200) return [];
-    final data = jsonDecode(res.body);
-    final List items = (data['data'] as List?) ?? [];
-    return items.map((e) => SpaceItem.fromJson(e as Map<String, dynamic>)).toList();
+      if (res.statusCode == 200) {
+        final List items = jsonDecode(res.body) as List? ?? [];
+        var result = items.map((e) => SpaceItem.fromJson(e as Map<String, dynamic>)).toList();
+        if (category != null && category.isNotEmpty && category != 'Todos') {
+          result = result.where((s) => s.type == category).toList();
+        }
+        return result;
+      }
+    } catch (e) {
+      // Tratar erro
+    }
+    return [];
   }
 
   Future<SpaceItem?> getById(String id) async {
-    final t = await _auth.token();
-    if (t == null) return null;
+    try {
+      final res = await _api.get('/map-points/$id');
 
-    final uri = Uri.parse('$kApiBase/items/map_points/$id').replace(queryParameters: {
-      'fields': 'id,title,type,image.id,park.name',
-    });
-    final res = await http.get(uri, headers: {'Authorization': 'Bearer $t'});
-    if (res.statusCode != 200) return null;
-    return SpaceItem.fromJson((jsonDecode(res.body)['data']) as Map<String, dynamic>);
+      if (res.statusCode == 200) {
+        return SpaceItem.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+      }
+    } catch (e) {
+      // Tratar erro
+    }
+    return null;
   }
 }

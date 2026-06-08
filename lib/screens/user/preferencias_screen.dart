@@ -113,40 +113,108 @@ class _PreferenciasScreenState extends State<PreferenciasScreen>
   // ── Dialog de configurações ───────────────────────────────────────────────
 
   void _abrirConfiguracoes(String permissao) {
+    final isNotif = permissao == 'notificações';
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Permissão de $permissao',
-          style: GoogleFonts.poppins(
-              fontWeight: FontWeight.w700, fontSize: 16, color: _dark),
-        ),
-        content: Text(
-          'Para alterar o acesso à $permissao, '
-          'acesse as Configurações do seu dispositivo.',
-          style: GoogleFonts.poppins(fontSize: 14, color: _lightGray, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancelar',
-                style: GoogleFonts.poppins(color: _lightGray)),
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Ícone circular com fundo verde suave
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: _green.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isNotif
+                      ? Icons.notifications_outlined
+                      : Icons.location_on_outlined,
+                  color: _green,
+                  size: 30,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Título
+              Text(
+                'Permissão de $permissao',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 17,
+                  color: _dark,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // Descrição
+              Text(
+                'Para alterar o acesso à $permissao, acesse as Configurações do seu dispositivo.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: _lightGray,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Botão principal — Abrir configurações
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _green,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    openAppSettings();
+                  },
+                  child: Text(
+                    'Abrir configurações',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // Cancelar discreto
+              GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    'Cancelar',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: _lightGray,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: _green,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () {
-              Navigator.pop(ctx);
-              openAppSettings();
-            },
-            child: Text('Abrir configurações',
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-          ),
-        ],
+        ),
       ),
     );
   }

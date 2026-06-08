@@ -9,9 +9,10 @@ final _auth = AuthService.instance;
 /// final ok = await requireLogin(context, featureName: 'favoritar');
 /// if (!ok) return; // usuário foi levado à aba Usuário para logar
 Future<bool> requireLogin(BuildContext context, {String featureName = 'esta ação'}) async {
-  final logged = await _auth.isLogged();
-  if (logged) return true;
+  // Usa cache síncrono — evita await antes de usar context
+  if (_auth.tokenSync != null) return true;
 
+  if (!context.mounted) return false;
   final go = await showDialog<bool>(
     context: context,
     builder: (c) => AlertDialog(
