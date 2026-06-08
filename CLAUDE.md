@@ -70,6 +70,10 @@ docs/
 - Cancelamento: usuário pode cancelar Pendente/Aprovada antes do dia da reserva
 - Push FCM: graceful degradation (funciona sem config Firebase; ativa ao plugar credenciais)
 - `Space` é a única entidade para lugares físicos (unificou map_points + spaces)
+- `my_reservations_screen.dart`: tabs Atuais / Histórico + paginação "ver mais" (5 itens/página)
+- Race condition eliminada no backend: `CreateIfNoConflict` com `SELECT FOR UPDATE` em transaction
+- Rejeição atômica: `UpdateStatusWithMotivo` atualiza status + motivo em query única (sem janela de falha parcial)
+- ListAll admin com paginação: `?page=1&page_size=100` (default 100, cap 500) + header `X-Total-Count`
 
 ## Sistema de denúncias (implementado)
 - Flutter: `DenuncieScreen` com CEP auto-fill, fotos comprimidas (1280px, 75% JPEG), dados do usuário logado pré-preenchidos
@@ -79,8 +83,10 @@ docs/
 
 ## Segurança — autenticação
 - JWT expira em **30 dias** (não 365)
-- Rate limit: **10 tentativas/min por IP** em `/login` e `/forgot-password`
+- Rate limit: **10 tentativas/min por IP** em `/login`, `/forgot-password`, `/register`, `/denuncias/upload`
 - Senha validada no backend: `min=8` (alinhado com Flutter)
+- CPF validado no backend: exatamente 11 dígitos (strip de máscara antes de validar)
+- Telefone validado no backend: 10–11 dígitos (strip de máscara)
 - `/forgot-password` sempre retorna 200 (não revela se email existe)
 - `me()` faz logout automático ao receber 401 (JWT expirado)
 
@@ -94,11 +100,24 @@ docs/
 - Backend: `PasswordResetToken` (15min, 3 tentativas, 3 req/hora), email via Resend (fallback Brevo via `EMAIL_PROVIDER` env)
 - Variáveis de ambiente necessárias: `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM`
 
+## Push Notifications FCM — configuração completa
+- Firebase projeto: `vem-pro-parque-16f7e`, bundle `com.vemproparquema`
+- `GoogleService-Info.plist` presente em `ios/Runner/` ✅
+- APNs Auth Key (`SMHXVK22HF`, Team `XRLM248224`) cadastrada no Firebase Console (dev + prod) ✅
+- `firebase-credentials.json` no VPS em `/home/wwsitw/apps/backend-park/` ✅
+- Backend Go: `FIREBASE_CREDENTIALS_FILE` aponta para esse arquivo no `.env`
+- App: capability **Push Notifications** deve estar no Xcode → Signing & Capabilities (confirmar entitlement `aps-environment`)
+- Fluxo: login → `saveTokenAfterLogin()` → `POST /me/fcm-token` → salvo na tabela `fcm_tokens`
+- Backend envia push em: aprovação, rejeição (com motivo + deeplink editar) e cancelamento pelo gestor
+- Para verificar token no banco: `SELECT user_id, platform, updated_at FROM fcm_tokens ORDER BY updated_at DESC LIMIT 5;`
+- Para verificar FCM no backend: `journalctl -u backend-park -n 100 | grep FCM`
+
 ## Pendências que dependem de ação humana
-1. **Firebase**: criar projeto e adicionar `google-services.json` (Android), `GoogleService-Info.plist` (iOS), `FIREBASE_CREDENTIALS_JSON` (env backend) para ativar push notifications
+1. **TestFlight push notifications**: adicionar capability "Push Notifications" no Xcode → Archive → nova build TestFlight → instalar → logar → aceitar permissão
 2. **Resend**: criar conta em resend.com, verificar domínio, adicionar `RESEND_API_KEY` e `EMAIL_FROM` no `.env` do backend
 3. **PAINEL-PARK**: não está no git — arquivos salvos localmente mas sem versionamento
-4. **Deploy**: rodar `deploy.sh` no PARQUE-BACK para subir as novas features ao servidor
+4. **Deploy**: rodar `deploy.sh` no PARQUE-BACK para subir novas features ao servidor
+5. **Email Brevo**: migrado para SMTP — variáveis necessárias: `BREVO_SMTP_LOGIN`, `BREVO_SMTP_PASSWORD`, `EMAIL_FROM`
 
 ## Componentes globais importantes
 - `AppToast` (`lib/widgets/app_toast.dart`) — toast estilo Duolingo, usar em vez de SnackBar
@@ -131,9 +150,42 @@ AppBar(
 - `padding: EdgeInsets.all(16)`
 - Separador entre cards: `SizedBox(height: 12 ou 16)` — NÃO usar Divider entre cards
 
+## Estrutura do backend Go (PARQUE-BACK) — repositórios
+Todos os repositórios ficam em `internal/infrastructure/persistence/` com prefixo `mysql_`:
+- `mysql_reservation_repository.go` — inclui `CreateIfNoConflict`, `UpdateStatusWithMotivo`, paginação
+- `mysql_favorite_repository.go` — movido de `database/gorm/` para cá (2026-06-08)
+- `mysql_fcm_token_repository.go`, `mysql_park_repository.go`, `mysql_user_repository.go`, etc.
+
+Email Brevo: usa SMTP em vez de REST API (`smtp-relay.brevo.com:587`).
+
 ---
 
 ## Histórico de mudanças
+
+### 2026-06-08 (fix: diagnóstico completo — BACK-01/04/07/08/11/12 + FLUTTER-01/02)
+
+**Backend (PARQUE-BACK):**
+- **BACK-01**: Race condition eliminada — `CreateIfNoConflict` com `SELECT FOR UPDATE` em transaction
+- **BACK-04**: Rate limit estendido para `/register` e `/denuncias/upload` (antes só `/login`)
+- **BACK-07**: `UpdateStatusWithMotivo` — status + motivo em query atômica única
+- **BACK-08**: Validação de CPF (11 dígitos) e telefone (10-11 dígitos) no `Register`; erros retornam 400 com mensagem clara
+- **BACK-11**: `FavoriteRepository` movido de `internal/infrastructure/database/gorm/` → `persistence/mysql_favorite_repository.go`
+- **BACK-12**: `ListAll` com paginação — `?page=&page_size=` (default 100, cap 500), header `X-Total-Count`
+- Email Brevo: migrado de REST API para SMTP (`smtp-relay.brevo.com:587`); erro de envio de senha agora logado
+
+**Flutter:**
+- **FLUTTER-01**: `reservations_service.dart` (Strapi) deletado; todo o fluxo usa `GoReservationRepository`
+- **FLUTTER-02**: `StrapiParkRepository` removido; `park_repository.dart` agora é interface pura
+- `spaces_service.dart`: migrado de Strapi `/items/map_points` → Go `/map-points`
+- `favorites_service.dart`: migrado de `http` raw para `ApiClient`; proteção contra double-tap (`_pending` set)
+- `parks_service.dart`: removido (código morto)
+- `map_screen.dart`: redesenhado com dados reais do Go backend via `GoParkRepository`; busca + geolocalização + ordenação por distância
+- `my_reservations_screen.dart`: tabs Atuais/Histórico + paginação "ver mais"
+- `back/go-api/`: removido do repo Flutter (backend vive em `/Users/sitwcomunicacaoemarketing/Desktop/PARQUE-BACK`)
+
+**Security:**
+- `.gitignore` reforçado: `KEYS/`, `*.p8`, `*.pem`, `.env` agora ignorados
+- Chave `AuthKey_SMHXVK22HF.p8` removida do histórico git (estava commitada acidentalmente)
 
 ### 2026-06-05 (feat: recuperação de senha via OTP)
 - **Fluxo completo implementado nos 3 projetos**
