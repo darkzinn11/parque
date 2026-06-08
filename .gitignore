@@ -42,6 +42,11 @@ app.*.map.json
 # Keys and Secrets
 chave_servidor
 chave_servidor.pub
+KEYS/
+*.p8
+*.pem
+.env
+configs/.env
 
 # Node dependencies
 node_modules/
