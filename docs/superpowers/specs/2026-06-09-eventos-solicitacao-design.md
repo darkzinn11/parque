@@ -52,6 +52,20 @@ type EventRequest struct {
 
 **Status possíveis:** `Pendente` → `Aprovada` | `Rejeitada` | `Cancelada`
 
+### `ParkActivityType`
+
+```go
+type ParkActivityType struct {
+    ID     uint   `gorm:"primaryKey"`
+    ParkID uint   `gorm:"index;not null"`
+    Nome   string `gorm:"size:50;not null"` // "Corrida", "Trilha", "Piquenique"...
+    Ordem  int    `gorm:"default:0"`
+}
+```
+
+Endpoint adicional: `GET /parks/:id/activity-types` — público, usado pelo app no Passo 4.  
+Admin: `GET/POST/PUT/DELETE /admin/parks/:id/activity-types`
+
 ### `ParkEventRule`
 
 ```go
@@ -271,5 +285,5 @@ Interface de listagem + formulário inline para criar/editar regras:
 ## Notas de Implementação
 
 - **Regras pré-cadastradas:** ao criar um novo parque, o sistema não gera regras automaticamente. O super_admin deve cadastrá-las com base nos fluxogramas de cada parque.
-- **Tipos de atividade por parque:** não há uma entidade separada — o campo `TipoAtividade` é texto livre no backend. O admin cadastra os tipos disponíveis como regras; o app recebe os tipos únicos a partir das regras do parque.
+- **Tipos de atividade por parque:** entidade própria `ParkActivityType` (park_id + nome, ex: "Corrida", "Trilha", "Piquenique"). O admin cadastra os tipos disponíveis para cada parque; o app lista os tipos do parque selecionado via `GET /parks/:id/activity-types`. As regras referenciam o campo `tipo_atividade` por nome (string), compatível com os tipos cadastrados.
 - **Conflito de datas:** o backend não bloqueia automaticamente conflitos de data/espaço em eventos (diferente das reservas). O gestor analisa manualmente — a solicitação é formal, não um slot automático.
