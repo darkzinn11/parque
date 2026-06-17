@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
@@ -9,8 +11,10 @@ import '../widgets/app_toast.dart';
 import '../widgets/favorite_button.dart';
 import '../data/park_repository.dart';
 import '../data/reviews_repository.dart';
+import '../data/repositories/space_repository.dart';
 import '../data/models/park.dart';
 import '../data/models/review.dart';
+import '../data/models/space.dart';
 import '../core/api/api_config.dart';
 import '../services/auth_service.dart';
 import '../data/models/map_focus.dart';
@@ -33,9 +37,12 @@ class ParkDetailScreen extends StatefulWidget {
 
 class _ParkDetailScreenState extends State<ParkDetailScreen> {
   late Future<Park?> _future;
-  List<Review> _reviews = [];     // aprovadas
-  List<Review> _myReviews = [];   // próprias (todos os status)
+  List<Review> _reviews = [];
+  List<Review> _myReviews = [];
+  List<Space> _spaces = [];
   bool _loadingReviews = true;
+  bool _loadingSpaces = true;
+  bool _descExpanded = false;
   Park? _loadedPark;
 
   @override
@@ -79,9 +86,18 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
     }
   }
 
-  // Verifica se o usuário já tem review ativa (pendente ou aprovada) para este parque
+  Future<void> _fetchSpaces(int parkId) async {
+    try {
+      final spaces = await SpaceRepository().fetchSpaces(parkId: parkId);
+      if (mounted) setState(() { _spaces = spaces; _loadingSpaces = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loadingSpaces = false);
+    }
+  }
+
+  // Verifica se o usuário já tem review ativa (pendente ou publicada) para este parque
   bool get _hasActiveReview =>
-      _myReviews.any((r) => r.status == 'Pendente' || r.status == 'Aprovada');
+      _myReviews.any((r) => r.status == 'Pendente' || r.status == 'Publicada');
 
   void _showAddReviewBottomSheet(BuildContext context, int parkId) {
     showModalBottomSheet(
@@ -139,6 +155,7 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
             _loadedPark = park;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _fetchReviews(park.id);
+              _fetchSpaces(park.id);
             });
           }
 
@@ -162,14 +179,16 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
               ),
               SliverToBoxAdapter(
                 child: Transform.translate(
-                  offset: const Offset(0, -16),
+                  offset: const Offset(0, -24),
                   child: _WhiteCard(
-                    radiusTop: 16,
+                    radiusTop: 24,
                     padding: const EdgeInsets.fromLTRB(25, 32, 25, 48),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Nome + chip de rating
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
                               child: Text(
@@ -186,43 +205,91 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
                             _ChipRating(rating: dynamicRating),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$dynamicReviewCount reviews',
-                          style: GoogleFonts.poppins(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: kDarkGray.withValues(alpha: .6),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        if (park.status != null)
-                          Row(
-                            children: [
-                              const Icon(Icons.circle, size: 8, color: kStatusDotGreen),
-                              const SizedBox(width: 6),
-                              Text(
-                                park.status!,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  color: kBrandGreen,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                        const SizedBox(height: 6),
+
+                        // Status + contagem de avaliações na mesma linha
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            if (park.status != null)
+                              Row(
+                                children: [
+                                  const Icon(Icons.circle, size: 8, color: kStatusDotGreen),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    park.status!,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 14,
+                                      color: kBrandGreen,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            else
+                              const SizedBox.shrink(),
+                            Text(
+                              '$dynamicReviewCount avaliações',
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: kDarkGray.withValues(alpha: .6),
                               ),
-                            ],
-                          ),
-                        const SizedBox(height: 16),
-                        if (park.description != null) ...[
-                          Text(
-                            park.description!,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              height: 1.45,
-                              color: kDarkGray.withValues(alpha: .9),
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Descrição com "Ler mais" (só se truncar)
+                        if (park.description != null) ...[
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final style = GoogleFonts.poppins(
+                                fontSize: 14,
+                                height: 1.45,
+                                color: kDarkGray.withValues(alpha: .9),
+                              );
+                              final tp = TextPainter(
+                                text: TextSpan(text: park.description!, style: style),
+                                maxLines: 3,
+                                textDirection: TextDirection.ltr,
+                              )..layout(maxWidth: constraints.maxWidth);
+                              final overflows = tp.didExceedMaxLines;
+                              return GestureDetector(
+                                onTap: overflows
+                                    ? () => setState(() => _descExpanded = !_descExpanded)
+                                    : null,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      park.description!,
+                                      maxLines: _descExpanded ? null : 3,
+                                      overflow: _descExpanded
+                                          ? TextOverflow.visible
+                                          : TextOverflow.ellipsis,
+                                      style: style,
+                                    ),
+                                    if (overflows) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _descExpanded ? 'Ler menos' : 'Ler mais',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: kBrandGreen,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              );
+                            },
                           ),
                           const SizedBox(height: 24),
                         ],
+
+                        // Botão Vem conhecer
                         SizedBox(
                           width: double.infinity,
                           child: GestureDetector(
@@ -261,7 +328,42 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
                           ),
                         ),
 
-                        // Seção de Avaliações
+                        // ── Descubra mais sobre o parque (só se houver espaços) ──
+                        if (!_loadingSpaces && _spaces.isNotEmpty) ...[
+                          const SizedBox(height: 32),
+                          Text(
+                            'Descubra mais sobre o parque',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: kBrandGreen,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Diversão para todas as idades, do nascer ao pôr do sol.',
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w400,
+                              color: const Color(0xFF121726),
+                              height: 20 / 14,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            height: 260,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _spaces.length,
+                              itemBuilder: (_, i) => _SpaceCard(
+                                space: _spaces[i],
+                                toImageUrl: _toImageUrl,
+                              ),
+                            ),
+                          ),
+                        ],
+
+                        // ── O que os visitantes acharam? ──────────────────────
                         const SizedBox(height: 32),
                         Text(
                           'O que os visitantes acharam?',
@@ -292,21 +394,18 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
                                     ),
                                   )
                                 : SizedBox(
-                                    height: 210,
+                                    height: 242,
                                     child: ListView.builder(
                                       scrollDirection: Axis.horizontal,
                                       itemCount: _reviews.length,
-                                      itemBuilder: (context, index) {
-                                        final review = _reviews[index];
-                                        return _ReviewCard(
-                                          review: review,
-                                          parkHeroUrl: heroUrl,
-                                        );
-                                      },
+                                      itemBuilder: (_, index) => _ReviewCard(
+                                        review: _reviews[index],
+                                        parkHeroUrl: heroUrl,
+                                      ),
                                     ),
                                   ),
 
-                        // Botão Avaliar este parque — oculto se já tem review ativa
+                        // Botão Avaliar
                         const SizedBox(height: 24),
                         if (!_hasActiveReview)
                           SizedBox(
@@ -375,12 +474,20 @@ class _ParallaxHeader extends SliverPersistentHeaderDelegate {
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     final topSafe = MediaQuery.of(context).padding.top + 12;
 
+    // Calcula o border radius dinamicamente baseado no scroll.
+    // É 24.0 quando expandido (shrinkOffset = 0) e vai para 0.0 quando totalmente colapsado.
+    final double maxScroll = maxExtent - minExtent;
+    final double currentRadius = maxScroll > 0
+        ? (1.0 - (shrinkOffset / maxScroll).clamp(0.0, 1.0)) * 24.0
+        : 24.0;
+
     return Stack(
       fit: StackFit.expand,
       children: [
+        // Imagem plana (sem border radius) por baixo
         if (url != null)
           Hero(
-            tag: 'park_${favoriteId}',
+            tag: 'park_$favoriteId',
             child: CachedNetworkImage(
               imageUrl: url!,
               fit: BoxFit.cover,
@@ -390,6 +497,22 @@ class _ParallaxHeader extends SliverPersistentHeaderDelegate {
           )
         else
           Container(color: Colors.grey.shade200),
+        
+        // Pílula branca com rounded corners que sobrepõe a imagem na base do header
+        if (currentRadius > 0)
+          Positioned(
+            bottom: -1.0,
+            left: -1.0,
+            right: -1.0,
+            child: Container(
+              height: currentRadius + 1.0,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(currentRadius)),
+              ),
+            ),
+          ),
+
         Positioned(
           top: topSafe,
           left: 16,
@@ -415,10 +538,21 @@ class _CircleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton.filled(
-      style: IconButton.styleFrom(backgroundColor: Colors.white),
-      onPressed: onTap,
-      icon: Icon(icon, color: kBrandGreen, size: 20),
+    return SizedBox(
+      width: 48,
+      height: 48,
+      child: Center(
+        child: IconButton.filled(
+          style: IconButton.styleFrom(
+            backgroundColor: Colors.white,
+            minimumSize: const Size(40, 40),
+            maximumSize: const Size(40, 40),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: onTap,
+          icon: Icon(icon, color: kBrandGreen, size: 20),
+        ),
+      ),
     );
   }
 }
@@ -429,9 +563,13 @@ class _CircleFavorite extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-      child: FavoriteButton(parkDocumentId: favoriteId, size: 28),
+    // SizedBox 48×48 iguala o tap-target do IconButton.filled (shrinkWrap não aplica aqui)
+    return SizedBox(
+      width: 48,
+      height: 48,
+      child: Center(
+        child: FavoriteButton(parkDocumentId: favoriteId, size: 40),
+      ),
     );
   }
 }
@@ -465,17 +603,25 @@ class _ChipRating extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: kBrandLightGreen,
-        borderRadius: BorderRadius.circular(14),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(color: kBrandGreen, width: 1.8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.star, size: 16, color: kBrandGreen),
+          const Icon(Icons.star_rounded, size: 17, color: kBrandGreen),
           const SizedBox(width: 4),
-          Text(rating.toStringAsFixed(1), style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 13)),
+          Text(
+            rating.toStringAsFixed(1),
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+              color: kDarkGray,
+            ),
+          ),
         ],
       ),
     );
@@ -508,7 +654,7 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-// ── Card de review com badge de status ──────────────────────────────────────
+// ── Card de review ──────────────────────────────────────────────────────────
 
 class _ReviewCard extends StatelessWidget {
   const _ReviewCard({required this.review, this.parkHeroUrl});
@@ -516,132 +662,421 @@ class _ReviewCard extends StatelessWidget {
   final Review review;
   final String? parkHeroUrl;
 
+  String? _resolveImg(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    if (raw.startsWith('http')) return raw;
+    return 'https://apps.sitw.com.br/backend-park$raw';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isPending = review.isPending;
-    final isRejected = review.isRejected;
-    final hasMidia = review.midiaUrl != null && review.midiaUrl!.isNotEmpty;
+    final imgUrl = _resolveImg(review.midiaUrl) ?? parkHeroUrl;
+    final hasText = review.text != null && review.text!.isNotEmpty;
+    final hasTitle = review.title != null && review.title!.isNotEmpty;
 
-    return Container(
-      width: 250,
-      margin: const EdgeInsets.only(right: 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFAFBF6),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isPending
-              ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
-              : isRejected
-                  ? Colors.grey.shade300
-                  : const Color(0xFFE5EFE2),
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Badge de status (só para review própria não aprovada)
-            if (isPending || isRejected)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                color: isPending
-                    ? const Color(0xFFFFFBEB)
-                    : const Color(0xFFF5F5F5),
-                child: Row(
-                  children: [
-                    Icon(
-                      isPending ? Icons.schedule : Icons.cancel_outlined,
-                      size: 12,
-                      color: isPending
-                          ? const Color(0xFFF59E0B)
-                          : Colors.grey.shade500,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      isPending ? 'Em análise' : 'Não publicada',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: isPending
-                            ? const Color(0xFFF59E0B)
-                            : Colors.grey.shade500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            // Imagem: foto da review (se tiver) ou imagem do parque
-            Container(
-              height: 80,
-              width: double.infinity,
-              color: const Color(0xFFE5EFE2),
-              child: hasMidia
-                  ? CachedNetworkImage(
-                      imageUrl: review.midiaUrl!,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => const ColoredBox(color: Color(0xFFE5EFE2)),
-                      errorWidget: (_, __, ___) => const Icon(Icons.image_not_supported, color: kBrandGreen),
-                    )
-                  : parkHeroUrl != null
-                      ? CachedNetworkImage(imageUrl: parkHeroUrl!, fit: BoxFit.cover)
-                      : const Icon(Icons.park, color: kBrandGreen, size: 36),
+    return GestureDetector(
+      onTap: () => _showDetail(context),
+      child: Container(
+        width: 240,
+        height: 230,
+        margin: const EdgeInsets.only(right: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFFE8E8E8),
+            width: 1.0,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      review.authorName ?? 'Sem Título',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: kDarkGray,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      review.text ?? '',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: kDarkGray.withValues(alpha: .7),
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Imagem e Badges
+              Stack(
+                children: [
+                  SizedBox(
+                    height: 120,
+                    width: double.infinity,
+                    child: imgUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: imgUrl,
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) => const ColoredBox(color: Color(0xFFE5EFE2)),
+                            errorWidget: (_, __, ___) => const ColoredBox(
+                              color: Color(0xFFE5EFE2),
+                              child: Center(child: Icon(Icons.park, color: kBrandGreen, size: 36)),
+                            ),
+                          )
+                        : const ColoredBox(
+                            color: Color(0xFFE5EFE2),
+                            child: Center(child: Icon(Icons.park, color: kBrandGreen, size: 36)),
+                          ),
+                  ),
+                  // Rating Badge
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: kBrandLightGreen,
+                        color: Colors.white.withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.star, size: 12, color: kBrandGreen),
+                          const Icon(Icons.star_rounded, size: 14, color: kBrandGreen),
                           const SizedBox(width: 4),
                           Text(
                             review.rating.toDouble().toStringAsFixed(1),
                             style: GoogleFonts.poppins(
                               fontWeight: FontWeight.w700,
-                              fontSize: 10,
+                              fontSize: 12,
                               color: kDarkGray,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ],
+                  ),
+                ],
+              ),
+              // Conteúdo do Card
+              SizedBox(
+                height: 106,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Título
+                      if (hasTitle) ...[
+                        Text(
+                          review.title!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: kDarkGray,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                      ],
+                      // Texto + "Ler mais"
+                      if (hasText) ...[
+                        Text(
+                          review.text!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: kDarkGray.withValues(alpha: .75),
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Ler mais',
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: kBrandGreen,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            const Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 8,
+                              color: kBrandGreen,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showDetail(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ReviewDetailSheet(review: review, parkHeroUrl: parkHeroUrl),
+    );
+  }
+}
+
+// ── Modal de detalhe da review ───────────────────────────────────────────────
+
+class _ReviewDetailSheet extends StatelessWidget {
+  const _ReviewDetailSheet({required this.review, this.parkHeroUrl});
+  final Review review;
+  final String? parkHeroUrl;
+
+  String? _resolveImg(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    if (raw.startsWith('http')) return raw;
+    return 'https://apps.sitw.com.br/backend-park$raw';
+  }
+
+  String _shortName(String full) {
+    final parts = full.trim().split(RegExp(r'\s+'));
+    if (parts.length <= 2) return full;
+    return '${parts.first} ${parts.last}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imgUrl = _resolveImg(review.midiaUrl) ?? parkHeroUrl;
+    final hasText = review.text != null && review.text!.isNotEmpty;
+    final hasTitle = review.title != null && review.title!.isNotEmpty;
+    final dateStr = review.createdAt != null
+        ? '${review.createdAt!.day.toString().padLeft(2, '0')}/${review.createdAt!.month.toString().padLeft(2, '0')}/${review.createdAt!.year}'
+        : null;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      builder: (_, controller) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+            ),
+            Expanded(
+              child: ListView(
+                controller: controller,
+                padding: EdgeInsets.zero,
+                children: [
+                  // Imagem
+                  if (imgUrl != null)
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                      child: SizedBox(
+                        height: 220,
+                        width: double.infinity,
+                        child: CachedNetworkImage(
+                          imageUrl: imgUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => const ColoredBox(color: Color(0xFFE5EFE2)),
+                          errorWidget: (_, __, ___) => const ColoredBox(color: Color(0xFFE5EFE2)),
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Rating
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: kBrandGreen, width: 1.5),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.star_rounded, size: 16, color: kBrandGreen),
+                              const SizedBox(width: 4),
+                              Text(review.rating.toDouble().toStringAsFixed(1),
+                                  style: GoogleFonts.poppins(
+                                      fontWeight: FontWeight.w700, fontSize: 14, color: kDarkGray)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        // Título
+                        if (hasTitle) ...[
+                          Text(review.title!,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 18, fontWeight: FontWeight.w700, color: kDarkGray)),
+                          const SizedBox(height: 10),
+                        ],
+                        // Texto completo
+                        if (hasText) ...[
+                          Text(review.text!,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 14, color: kDarkGray.withValues(alpha: .85), height: 1.55)),
+                          const SizedBox(height: 20),
+                        ],
+                        const Divider(),
+                        const SizedBox(height: 14),
+                        // Info do usuário
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 22,
+                              backgroundColor: kBrandGreen.withValues(alpha: .12),
+                              child: Text(
+                                review.displayName.isNotEmpty
+                                    ? review.displayName[0].toUpperCase()
+                                    : 'V',
+                                style: GoogleFonts.poppins(
+                                    fontSize: 16, fontWeight: FontWeight.w700, color: kBrandGreen),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(_shortName(review.displayName),
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 15, fontWeight: FontWeight.w600, color: kDarkGray)),
+                                if (dateStr != null)
+                                  Text('Avaliou em $dateStr',
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 12, color: kDarkGray.withValues(alpha: .55))),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Card de ponto de interesse ───────────────────────────────────────────────
+
+class _SpaceCard extends StatelessWidget {
+  const _SpaceCard({required this.space, required this.toImageUrl});
+  final Space space;
+  final String? Function(String?) toImageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final imgUrl = toImageUrl(space.imageURL);
+    return SizedBox(
+      width: 282,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: SizedBox(
+                height: 200,
+                width: double.infinity,
+                child: imgUrl != null
+                    ? _SmartImage(url: imgUrl)
+                    : Container(
+                        color: const Color(0xFFE5EFE2),
+                        child: const Center(
+                          child: Icon(Icons.park_outlined, color: kBrandGreen, size: 40),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              space.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: kDarkGray,
+                height: 1.3,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Detecta se a imagem é retrato e aplica BoxFit adequado
+class _SmartImage extends StatefulWidget {
+  const _SmartImage({required this.url});
+  final String url;
+
+  @override
+  State<_SmartImage> createState() => _SmartImageState();
+}
+
+class _SmartImageState extends State<_SmartImage> {
+  bool? _isPortrait;
+
+  @override
+  void initState() {
+    super.initState();
+    _probeAspectRatio();
+  }
+
+  void _probeAspectRatio() {
+    final stream = NetworkImage(widget.url).resolve(ImageConfiguration.empty);
+    stream.addListener(ImageStreamListener(
+      (info, _) {
+        if (mounted) {
+          setState(() => _isPortrait = info.image.height > info.image.width);
+        }
+      },
+      onError: (_, __) {},
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final portrait = _isPortrait ?? false;
+    return Container(
+      color: portrait ? kBrandGreen.withValues(alpha: 0.12) : const Color(0xFFE5EFE2),
+      child: CachedNetworkImage(
+        imageUrl: widget.url,
+        fit: portrait ? BoxFit.contain : BoxFit.cover,
+        placeholder: (_, __) => const SizedBox.shrink(),
+        errorWidget: (_, __, ___) => Container(
+          color: const Color(0xFFE5EFE2),
+          child: const Center(
+            child: Icon(Icons.park_outlined, color: kBrandGreen, size: 40),
+          ),
         ),
       ),
     );
@@ -678,6 +1113,7 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
   }
 
   Future<void> _pickPhoto() async {
+    final repo = context.read<ReviewsRepository>();
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       backgroundColor: Colors.white,
@@ -717,7 +1153,6 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
     });
 
     try {
-      final repo = context.read<ReviewsRepository>();
       final url = await repo.uploadMedia(file.path);
       if (mounted) {
         setState(() {
@@ -769,7 +1204,7 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
         if (review != null) {
           AppToast.show(
             context,
-            'Avaliação enviada! Será publicada após análise.',
+            'Avaliação publicada com sucesso!',
             type: ToastType.success,
           );
           widget.onSuccess();
@@ -957,10 +1392,8 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          _selectedPhoto!.path.startsWith('http')
-                              ? _selectedPhoto!.path
-                              : _selectedPhoto!.path,
+                        child: Image.file(
+                          File(_selectedPhoto!.path),
                           width: 72,
                           height: 72,
                           fit: BoxFit.cover,
