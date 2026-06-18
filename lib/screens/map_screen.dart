@@ -8,6 +8,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../data/models/map_focus.dart';
 import '../data/models/park.dart';
@@ -753,67 +754,81 @@ class _RoutePickerSheet extends StatefulWidget {
 }
 
 class _RoutePickerSheetState extends State<_RoutePickerSheet> {
-  final List<_NavApp> _available = [];
-  bool _checking = true;
-
   static final _apps = [
     _NavApp(
       name: 'Waze',
-      icon: '🚗',
-      url: (lat, lng) => 'waze://ul?ll=$lat,$lng&navigate=yes',
+      assetPath: 'assets/images/maps/waze.png',
+      nativeUrl: (lat, lng) => 'waze://ul?ll=$lat,$lng&navigate=yes',
+      webUrl: (lat, lng) => 'https://waze.com/ul?ll=$lat,$lng&navigate=yes',
     ),
     _NavApp(
       name: 'Google Maps',
-      icon: '🗺️',
-      url: (lat, lng) => 'google.navigation:q=$lat,$lng',
-    ),
-    _NavApp(
-      name: 'Apple Maps',
-      icon: '🗾',
-      url: (lat, lng) => 'maps://maps.apple.com/?daddr=$lat,$lng',
-      iosOnly: true,
+      assetPath: 'assets/images/maps/google_maps.svg',
+      isSvg: true,
+      nativeUrl: (lat, lng) => 'comgooglemaps://?daddr=$lat,$lng&directionsmode=driving',
+      webUrl: (lat, lng) => 'https://maps.google.com/?daddr=$lat,$lng',
     ),
   ];
 
-  @override
-  void initState() {
-    super.initState();
-    _checkApps();
-  }
-
-  Future<void> _checkApps() async {
-    final isIos = Theme.of(context).platform == TargetPlatform.iOS;
-    for (final app in _apps) {
-      if (app.iosOnly && !isIos) continue;
-      final uri = Uri.parse(app.url(widget.lat, widget.lng));
-      if (await canLaunchUrl(uri)) {
-        _available.add(app);
-      }
-    }
-
-    if (_available.isEmpty) {
-      _available.add(_NavApp(
-        name: 'Abrir no browser',
-        icon: '🌐',
-        url: (lat, lng) =>
-            'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng',
-      ));
-    }
-
-    if (mounted) setState(() => _checking = false);
-  }
-
   Future<void> _launch(_NavApp app) async {
-    final uri = Uri.parse(app.url(widget.lat, widget.lng));
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final nativeUri = Uri.parse(app.nativeUrl(widget.lat, widget.lng));
+    bool launched = false;
+    try {
+      launched = await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+    if (!launched) {
+      final webUri = Uri.parse(app.webUrl(widget.lat, widget.lng));
+      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+    }
     if (mounted) Navigator.pop(context);
+  }
+
+  Widget _buildCard(_NavApp app) {
+    return Expanded(
+      child: InkWell(
+        onTap: () => _launch(app),
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (app.isSvg)
+                SvgPicture.asset(app.assetPath, width: 56, height: 56)
+              else
+                Image.asset(app.assetPath, width: 56, height: 56, fit: BoxFit.contain),
+              const SizedBox(height: 10),
+              Text(
+                app.name,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: kDarkGray,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -845,30 +860,14 @@ class _RoutePickerSheetState extends State<_RoutePickerSheet> {
                 color: kDarkGray.withValues(alpha: 0.5),
               ),
             ),
-            const SizedBox(height: 12),
-            if (_checking)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: Center(child: CircularProgressIndicator(color: kBrandGreen)),
-              )
-            else
-              ..._available.map(
-                (app) => ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  leading: Text(app.icon, style: const TextStyle(fontSize: 28)),
-                  title: Text(
-                    app.name,
-                    style: GoogleFonts.poppins(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: kDarkGray,
-                    ),
-                  ),
-                  trailing: const Icon(Icons.chevron_right, color: kBrandGreen),
-                  onTap: () => _launch(app),
-                ),
-              ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                _buildCard(_apps[0]),
+                const SizedBox(width: 12),
+                _buildCard(_apps[1]),
+              ],
+            ),
           ],
         ),
       ),
@@ -879,15 +878,17 @@ class _RoutePickerSheetState extends State<_RoutePickerSheet> {
 class _NavApp {
   const _NavApp({
     required this.name,
-    required this.icon,
-    required this.url,
-    this.iosOnly = false,
+    required this.assetPath,
+    required this.nativeUrl,
+    required this.webUrl,
+    this.isSvg = false,
   });
 
   final String name;
-  final String icon;
-  final String Function(double lat, double lng) url;
-  final bool iosOnly;
+  final String assetPath;
+  final bool isSvg;
+  final String Function(double lat, double lng) nativeUrl;
+  final String Function(double lat, double lng) webUrl;
 }
 
 // ── Tela de busca customizada ─────────────────────────────────────────────────

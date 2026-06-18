@@ -30,7 +30,11 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
   int _selectedDateIndex = 0;
 
   List<String> _slots = [];
-  String? _selectedSlotValue;
+
+  // Seleção de 1–2 horas consecutivas.
+  // _anchorHour: primeira hora marcada (início). _selCount: 1 ou 2 slots.
+  int? _anchorHour;
+  int _selCount = 0;
 
   @override
   void initState() {
@@ -73,7 +77,8 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
     if (_space == null) return;
     setState(() {
       _isLoadingSlots = true;
-      _selectedSlotValue = null;
+      _anchorHour = null;
+      _selCount = 0;
     });
 
     final date = _dates[_selectedDateIndex];
@@ -104,16 +109,18 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
   }
 
   void _continue() {
-    if (_selectedSlotValue == null) {
+    if (_anchorHour == null || _selCount == 0) {
       AppToast.show(context, 'Por favor, selecione um horário.', type: ToastType.error);
       return;
     }
 
     final dateStr = DateFormat('yyyy-MM-dd').format(_dates[_selectedDateIndex]);
-    final slot = _selectedSlotValue!;
-    final times = slot.split(' - ');
-    final startTime = times[0];
-    final endTime = times.length > 1 ? times[1] : '';
+    final startHour = _anchorHour!;
+    final endHour = startHour + _selCount; // _selCount = 1 ou 2
+
+    String fmt(int h) => '${h.toString().padLeft(2, '0')}:00';
+    final startTime = fmt(startHour);
+    final endTime = fmt(endHour);
 
     context.push(
       '/tabs/home/reservas/espaco/${widget.spaceId}/formulario',
@@ -125,9 +132,72 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
         'data': dateStr,
         'horaInicio': startTime,
         'horaFim': endTime,
+        'duracaoHoras': _selCount,
         'numParticipants': 1, // participantes adicionados na próxima tela
       },
     );
+  }
+
+  /// Hora de início (int) de um slot "HH:00 - HH:00".
+  int _slotStartHour(String slot) {
+    return int.tryParse(slot.split(' - ')[0].split(':')[0]) ?? 0;
+  }
+
+  bool _isHourSelected(int hour) {
+    if (_anchorHour == null) return false;
+    return hour >= _anchorHour! && hour < _anchorHour! + _selCount;
+  }
+
+  /// Lógica de toque: 1–2 horas consecutivas.
+  void _onSlotTap(int hour) {
+    setState(() {
+      if (_anchorHour == null) {
+        // Nada marcado → define âncora (1h).
+        _anchorHour = hour;
+        _selCount = 1;
+        return;
+      }
+
+      if (_selCount == 1) {
+        if (hour == _anchorHour) {
+          // Toca de novo na âncora → desmarca.
+          _anchorHour = null;
+          _selCount = 0;
+        } else if (hour == _anchorHour! + 1 || hour == _anchorHour! - 1) {
+          // Slot adjacente disponível → estende para 2h.
+          _anchorHour = hour < _anchorHour! ? hour : _anchorHour;
+          _selCount = 2;
+        } else {
+          // Não-adjacente → recomeça a partir do slot tocado.
+          _anchorHour = hour;
+          _selCount = 1;
+        }
+        return;
+      }
+
+      // _selCount == 2.
+      final secondHour = _anchorHour! + 1;
+      if (hour == secondHour) {
+        // Toca no segundo slot → volta para 1h (só a âncora).
+        _selCount = 1;
+      } else if (hour == _anchorHour) {
+        // Toca na âncora → mantém só a âncora (1h).
+        _selCount = 1;
+      } else {
+        // Qualquer outro → recomeça a partir do slot tocado.
+        _anchorHour = hour;
+        _selCount = 1;
+      }
+    });
+  }
+
+  /// Resumo textual da seleção, ex: "13:00 – 15:00 · 2h".
+  String? _selectionSummary() {
+    if (_anchorHour == null || _selCount == 0) return null;
+    final start = _anchorHour!;
+    final end = start + _selCount;
+    String fmt(int h) => '${h.toString().padLeft(2, '0')}:00';
+    return '${fmt(start)} – ${fmt(end)} · ${_selCount}h';
   }
 
   @override
@@ -210,7 +280,7 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: DropdownButtonFormField<int>(
-                                value: _selectedDateIndex,
+                                initialValue: _selectedDateIndex,
                                 decoration: InputDecoration(
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                   isDense: true,
@@ -292,11 +362,39 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
                   ),
                 ),
 
+                // Resumo da seleção
+                if (_selectionSummary() != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: _green.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _green.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.schedule, color: _green, size: 18),
+                          const SizedBox(width: 10),
+                          Text(
+                            _selectionSummary()!,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: _green,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
                 // Botão Agendar agora
                 Padding(
                   padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).padding.bottom + 16),
                   child: FilledButton(
-                    onPressed: _continue,
+                    onPressed: (_anchorHour == null || _selCount == 0) ? null : _continue,
                     style: FilledButton.styleFrom(
                       backgroundColor: _green,
                       disabledBackgroundColor: _green.withValues(alpha: 0.5),
@@ -364,17 +462,12 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
             runSpacing: 12,
             children: slots.map((slot) {
               final isAvailable = _slots.contains(slot);
-              final isSelected = _selectedSlotValue == slot;
+              final hour = _slotStartHour(slot);
+              final isSelected = _isHourSelected(hour);
               final startHour = slot.split(' - ')[0];
 
               return InkWell(
-                onTap: isAvailable
-                    ? () {
-                        setState(() {
-                          _selectedSlotValue = slot;
-                        });
-                      }
-                    : null,
+                onTap: isAvailable ? () => _onSlotTap(hour) : null,
                 borderRadius: BorderRadius.circular(10),
                 child: Container(
                   width: (MediaQuery.of(context).size.width - 48 - 36) / 4,
@@ -426,9 +519,9 @@ class _BookingCalendarScreenState extends State<BookingCalendarScreen> {
     }
 
     final List<String> list = [];
-    for (int hour = startHour; hour + 2 <= endHour; hour += 2) {
+    for (int hour = startHour; hour + 1 <= endHour; hour += 1) {
       final startStr = '${hour.toString().padLeft(2, '0')}:00';
-      final endStr = '${(hour + 2).toString().padLeft(2, '0')}:00';
+      final endStr = '${(hour + 1).toString().padLeft(2, '0')}:00';
       list.add('$startStr - $endStr');
     }
     return list;

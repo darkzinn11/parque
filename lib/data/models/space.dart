@@ -13,6 +13,8 @@ class Space {
   final int maxCapacity;
   final String? address;
   final SpaceRule? rule;
+  final bool permiteEvento;
+  final bool permiteReserva;
 
   Space({
     required this.id,
@@ -27,6 +29,8 @@ class Space {
     required this.maxCapacity,
     this.address,
     this.rule,
+    this.permiteEvento = false,
+    this.permiteReserva = true,
   });
 
   factory Space.fromJson(Map<String, dynamic> json) {
@@ -43,6 +47,8 @@ class Space {
       maxCapacity: json['capacidade_max'] is int ? json['capacidade_max'] : int.tryParse('${json['capacidade_max']}') ?? 0,
       address: json['endereco']?.toString(),
       rule: json['rule'] != null ? SpaceRule.fromJson(json['rule'] as Map<String, dynamic>) : null,
+      permiteEvento: json['permite_evento'] == true,
+      permiteReserva: json['permite_reserva'] != false,
     );
   }
 }

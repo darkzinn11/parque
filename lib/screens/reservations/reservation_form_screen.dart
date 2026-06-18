@@ -16,14 +16,21 @@ const _lightGray = Color(0xFF8F959E);
 
 /// Formulário de participantes + envio da reserva.
 /// Modo criação: recebe [bookingData] (mapa vindo do calendário).
-/// Modo edição (reenvio): recebe [reservation] rejeitada.
+/// Modo edição (reenvio): recebe [reservation] rejeitada, ou apenas [reservationId]
+/// quando aberto via deeplink de notificação (busca a reserva automaticamente).
 class ReservationFormScreen extends StatefulWidget {
-  const ReservationFormScreen({super.key, this.bookingData, this.reservation});
+  const ReservationFormScreen({
+    super.key,
+    this.bookingData,
+    this.reservation,
+    this.reservationId,
+  });
 
   final Map<String, dynamic>? bookingData;
   final Reservation? reservation;
+  final int? reservationId;
 
-  bool get isEdit => reservation != null;
+  bool get isEdit => reservation != null || reservationId != null;
 
   @override
   State<ReservationFormScreen> createState() => _ReservationFormScreenState();
@@ -44,62 +51,111 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
   bool _agreeTerms = false;
   bool _isSubmitting = false;
+  bool _loadingReservation = false;
+  String? _loadError;
+  Reservation? _fetchedReservation;
   Timer? _countdownTimer;
   Duration? _timeLeft;
 
   // Dados derivados
-  late final int _spaceId;
-  late final String _spaceName;
-  late final int _capacityMax;
-  late final String _data;
-  late final String _horaInicio;
-  late final String _horaFim;
-  late final String _termsOfUse;
+  late int _spaceId;
+  late String _spaceName;
+  late int _capacityMax;
+  late String _data;
+  late String _horaInicio;
+  late String _horaFim;
+  late String _termsOfUse;
+  int _duracaoHoras = 1;
+
+  Reservation? get _reservation => widget.reservation ?? _fetchedReservation;
 
   @override
   void initState() {
     super.initState();
-    if (widget.isEdit) {
-      final r = widget.reservation!;
-      _spaceId = r.spaceId;
-      _spaceName = r.spaceName;
-      _capacityMax = r.capacityMax;
-      _data = r.data;
-      _horaInicio = r.horaInicio;
-      _horaFim = r.horaFim;
-      _termsOfUse = '';
-      _agreeTerms = true; // termos já aceitos no envio original
-      for (final p in r.participants) {
-        final c = _ParticipantControllers();
-        c.nome.text = p.nome;
-        c.cpf.text = p.cpf;
-        _participants.add(c);
-      }
-      _startCountdown();
+    if (widget.reservation != null) {
+      _initFromReservation(widget.reservation!);
+    } else if (widget.reservationId != null) {
+      _fetchAndInit(widget.reservationId!);
     } else {
-      final d = widget.bookingData ?? const {};
-      _spaceId = (d['spaceId'] ?? 0) as int;
-      _spaceName = (d['spaceName'] ?? 'Espaço').toString();
-      _capacityMax = (d['capacityMax'] ?? 0) as int;
-      _data = (d['data'] ?? '').toString();
-      _horaInicio = (d['horaInicio'] ?? '').toString();
-      _horaFim = (d['horaFim'] ?? '').toString();
-      _termsOfUse = (d['termsOfUse'] ?? '').toString();
+      _initFromBookingData();
+    }
+  }
 
-      // Pre-popula os controladores de participantes de acordo com a quantidade informada
-      final numParticipants = (d['numParticipants'] ?? 1) as int;
-      final count = numParticipants - 1; // o responsável já conta como 1
-      for (int i = 0; i < count; i++) {
-        _participants.add(_ParticipantControllers());
-      }
+  Future<void> _fetchAndInit(int id) async {
+    setState(() => _loadingReservation = true);
+    final r = await _repo.getById(id);
+    if (!mounted) return;
+    if (r == null) {
+      setState(() {
+        _loadingReservation = false;
+        _loadError = 'Reserva não encontrada.';
+      });
+      return;
+    }
+    // Guard (code-review #5): só permite reenviar/editar reservas Rejeitadas.
+    // Ao abrir via deeplink, a reserva pode já ter sido aprovada/cancelada/expirada.
+    if (r.status != 'Rejeitada') {
+      _fetchedReservation = r;
+      _initFromReservation(r);
+      setState(() {
+        _loadingReservation = false;
+        _loadError = 'Esta reserva não pode mais ser editada.';
+      });
+      AppToast.show(
+        context,
+        'Esta reserva não pode mais ser editada.',
+        type: ToastType.warning,
+      );
+      return;
+    }
+
+    _fetchedReservation = r;
+    _initFromReservation(r);
+    setState(() => _loadingReservation = false);
+  }
+
+  void _initFromReservation(Reservation r) {
+    _spaceId = r.spaceId;
+    _spaceName = r.spaceName;
+    _capacityMax = r.capacityMax;
+    _data = r.data;
+    _horaInicio = r.horaInicio;
+    _horaFim = r.horaFim;
+    _duracaoHoras = _durationFromRange(r.horaInicio, r.horaFim);
+    _termsOfUse = '';
+    _agreeTerms = true;
+    for (final p in r.participants) {
+      final c = _ParticipantControllers();
+      c.nome.text = p.nome;
+      c.cpf.text = p.cpf;
+      _participants.add(c);
+    }
+    _startCountdown();
+  }
+
+  void _initFromBookingData() {
+    final d = widget.bookingData ?? const {};
+    _spaceId = (d['spaceId'] ?? 0) as int;
+    _spaceName = (d['spaceName'] ?? 'Espaço').toString();
+    _capacityMax = (d['capacityMax'] ?? 0) as int;
+    _data = (d['data'] ?? '').toString();
+    _horaInicio = (d['horaInicio'] ?? '').toString();
+    _horaFim = (d['horaFim'] ?? '').toString();
+    _duracaoHoras = (d['duracaoHoras'] ?? _durationFromRange(_horaInicio, _horaFim)) as int;
+    _termsOfUse = (d['termsOfUse'] ?? '').toString();
+
+    final numParticipants = (d['numParticipants'] ?? 1) as int;
+    final count = numParticipants - 1;
+    for (int i = 0; i < count; i++) {
+      _participants.add(_ParticipantControllers());
     }
   }
 
   void _startCountdown() {
-    _timeLeft = widget.reservation?.resubmitTimeLeft;
+    _timeLeft = _reservation?.resubmitTimeLeft;
     if (_timeLeft == null) return;
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      final left = widget.reservation?.resubmitTimeLeft;
+      final left = _reservation?.resubmitTimeLeft;
       if (!mounted) return;
       if (left == null) {
         _countdownTimer?.cancel();
@@ -166,13 +222,14 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
     final ReservationResult result;
     if (widget.isEdit) {
-      result = await _repo.resubmit(id: widget.reservation!.id, participants: participants);
+      result = await _repo.resubmit(id: _reservation!.id, participants: participants);
     } else {
       result = await _repo.create(
         spaceId: _spaceId,
         dateStr: _data,
         startTime: _horaInicio,
         participants: participants,
+        duracaoHoras: _duracaoHoras,
       );
     }
 
@@ -203,6 +260,19 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
     );
   }
 
+  /// Calcula a duração (em horas) a partir de "HH:MM" início/fim.
+  /// Fallback para 1h se não conseguir parsear.
+  int _durationFromRange(String inicio, String fim) {
+    final iParts = inicio.split(':');
+    final fParts = fim.split(':');
+    if (iParts.length < 2 || fParts.length < 2) return 1;
+    final iH = int.tryParse(iParts[0]);
+    final fH = int.tryParse(fParts[0]);
+    if (iH == null || fH == null) return 1;
+    final diff = fH - iH;
+    return diff >= 1 ? diff : 1;
+  }
+
   String _formattedDate() {
     final parts = _data.split('-');
     if (parts.length != 3) return _data;
@@ -224,6 +294,46 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingReservation) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, color: _green),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          title: Text('Reenviar reserva',
+              style: GoogleFonts.poppins(color: _green, fontSize: 20, fontWeight: FontWeight.w700)),
+          centerTitle: true,
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_loadError != null) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, color: _green),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          title: Text('Reenviar reserva',
+              style: GoogleFonts.poppins(color: _green, fontSize: 20, fontWeight: FontWeight.w700)),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Text(_loadError!, style: GoogleFonts.poppins(color: _dark)),
+        ),
+      );
+    }
+
     final totalPessoas = _participants.length + 1; // participantes + responsável
 
     return Scaffold(
@@ -275,7 +385,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
                 Text('Horário:', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700, color: _dark)),
                 const SizedBox(height: 4),
                 Text(
-                  'Das $_horaInicio às $_horaFim horas',
+                  'Das $_horaInicio às $_horaFim horas · ${_duracaoHoras}h',
                   style: GoogleFonts.poppins(fontSize: 15, color: _dark),
                 ),
                 const SizedBox(height: 20),
@@ -385,7 +495,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
   Widget _buildRejectedBanner() {
     final left = _timeLeft;
-    final motivo = widget.reservation?.motivoRejeicao ?? '';
+    final motivo = _reservation?.motivoRejeicao ?? '';
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(14),

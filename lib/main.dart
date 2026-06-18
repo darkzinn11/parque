@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -10,6 +11,7 @@ import 'routes/app_router.dart';
 import 'services/auth_service.dart';
 import 'services/favorites_service.dart';
 import 'services/notification_service.dart';
+import 'services/run_tracker_service.dart';
 
 // Providers
 import 'providers/notification_provider.dart';
@@ -35,6 +37,14 @@ Future<void> main() async {
 
   await AuthService.instance.init();
   await FavoritesService.instance.init();
+  unawaited(RunService.instance.loadActivities());
+
+  // Quando o usuário faz login, sobe as atividades locais pendentes para a nuvem
+  AuthService.instance.addListener(() {
+    if (AuthService.instance.tokenSync != null) {
+      unawaited(RunService.instance.syncPending());
+    }
+  });
 
   final notificationProvider = NotificationProvider();
   await notificationProvider.init();
@@ -49,6 +59,9 @@ Future<void> main() async {
         AppToast.show(ctx, title, type: ToastType.info);
       }
     };
+  // Remove o token FCM deste dispositivo ao fazer logout.
+  AuthService.instance.onBeforeLogout = NotificationService.instance.deleteTokenOnLogout;
+
   // Não aguardamos: a inicialização é best-effort e não deve travar o boot.
   unawaited(NotificationService.instance.initialize());
 
@@ -67,6 +80,7 @@ class ParquesApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider.value(value: AuthService.instance),
         ChangeNotifierProvider.value(value: FavoritesService.instance),
+        ChangeNotifierProvider.value(value: RunService.instance),
         ChangeNotifierProvider.value(value: notificationProvider),
         Provider<ParkRepository>(
           create: (_) => GoParkRepository(),
@@ -84,6 +98,16 @@ class ParquesApp extends StatelessWidget {
       child: MaterialApp.router(
         title: 'Parques SLZ',
         debugShowCheckedModeBanner: false,
+
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('pt', 'BR'),
+          Locale('en', 'US'),
+        ],
 
         // ✅ Usa o GoRouter central
         routerConfig: appRouter,

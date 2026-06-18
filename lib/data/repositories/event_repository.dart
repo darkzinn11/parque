@@ -7,6 +7,7 @@ import '../models/app_event.dart';
 abstract class EventRepository {
   Future<List<AppEvent>> fetchAll();
   Future<AppEvent?> fetchById(String id);
+  Future<void> toggleInteresse(String id, bool registrar);
 }
 
 class GoEventRepository implements EventRepository {
@@ -17,22 +18,10 @@ class GoEventRepository implements EventRepository {
   @override
   Future<List<AppEvent>> fetchAll() async {
     try {
-      // No Go, o módulo parece ser chamado de 'atividades' no dashboard
-      // mas o usuário solicitou 'eventos'. Tentaremos o endpoint /atividades
-      final res = await _api.get('/atividades');
-      
+      final res = await _api.get('/eventos');
       if (res.statusCode == 200) {
         final List items = jsonDecode(res.body);
         return items.map((e) => AppEvent.fromMap(e)).toList();
-      }
-      
-      // Fallback para /eventos caso o backend siga o nome antigo
-      if (res.statusCode == 404) {
-        final res2 = await _api.get('/eventos');
-        if (res2.statusCode == 200) {
-          final List items = jsonDecode(res2.body);
-          return items.map((e) => AppEvent.fromMap(e)).toList();
-        }
       }
     } catch (e) {
       if (kDebugMode) print('❌ Erro GoEventRepository.fetchAll: $e');
@@ -43,11 +32,25 @@ class GoEventRepository implements EventRepository {
   @override
   Future<AppEvent?> fetchById(String id) async {
     try {
-      final res = await _api.get('/atividades/$id');
+      final res = await _api.get('/eventos/$id');
       if (res.statusCode == 200) {
         return AppEvent.fromMap(jsonDecode(res.body));
       }
     } catch (_) {}
     return null;
+  }
+
+  @override
+  Future<void> toggleInteresse(String id, bool registrar) async {
+    try {
+      if (registrar) {
+        await _api.post('/eventos/$id/interesse', body: {});
+      } else {
+        await _api.delete('/eventos/$id/interesse');
+      }
+    } catch (e) {
+      if (kDebugMode) print('❌ Erro GoEventRepository.toggleInteresse: $e');
+      rethrow;
+    }
   }
 }

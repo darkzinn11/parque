@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -318,6 +320,7 @@ class ActivityDetailModal extends StatefulWidget {
 
 class _ActivityDetailModalState extends State<ActivityDetailModal> {
   final GlobalKey _shareCardKey = GlobalKey();
+  final GlobalKey _shareButtonKey = GlobalKey();
   GoogleMapController? _mapController;
   Uint8List? _mapSnapshotBytes;
 
@@ -513,6 +516,7 @@ class _ActivityDetailModalState extends State<ActivityDetailModal> {
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
+                              key: _shareButtonKey,
                               icon: const Icon(Icons.share),
                               label: const Text('Compartilhar'),
                               style: OutlinedButton.styleFrom(
@@ -524,7 +528,7 @@ class _ActivityDetailModalState extends State<ActivityDetailModal> {
                                   borderRadius: BorderRadius.circular(30),
                                 ),
                               ),
-                              onPressed: () => _handleShare(context),
+                              onPressed: () => _handleShare(),
                             ),
                           ),
                           const SizedBox(width: 16),
@@ -541,7 +545,7 @@ class _ActivityDetailModalState extends State<ActivityDetailModal> {
                                   borderRadius: BorderRadius.circular(30),
                                 ),
                               ),
-                              onPressed: () => _handleSave(context),
+                              onPressed: () => _handleSave(),
                             ),
                           ),
                         ],
@@ -606,60 +610,97 @@ class _ActivityDetailModalState extends State<ActivityDetailModal> {
     }
   }
 
+  /// Captura o card como PNG.
+  /// Etapas:
+  /// 1. Tira screenshot nativo do GoogleMap (contorna limitação do Platform View)
+  /// 2. Aguarda o rebuild com Image.memory substituindo o mapa
+  /// 3. Captura o RepaintBoundary completo via toImage()
   Future<Uint8List?> _capturePng() async {
     try {
+      // Passo 1: snapshot do mapa (necessário pois Platform Views não são capturáveis
+      // diretamente pelo RepaintBoundary no iOS)
       if (_mapController != null && _mapSnapshotBytes == null) {
         final mapBytes = await _mapController!.takeSnapshot();
         if (mapBytes != null) {
+          final completer = Completer<void>();
           setState(() {
             _mapSnapshotBytes = mapBytes;
           });
-          await Future.delayed(const Duration(milliseconds: 150));
+          // Aguarda o próximo frame para garantir que Image.memory está renderizado
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            completer.complete();
+          });
+          await completer.future;
+          // Frame adicional de segurança
+          await Future.delayed(const Duration(milliseconds: 80));
         }
       }
 
-      RenderRepaintBoundary? boundary =
-          _shareCardKey.currentContext?.findRenderObject()
-              as RenderRepaintBoundary?;
+      final boundary = _shareCardKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
       if (boundary == null) return null;
 
-      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-      ByteData? byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       return byteData?.buffer.asUint8List();
     } catch (e) {
-      debugPrint("Erro ao capturar imagem: $e");
+      debugPrint('Erro ao capturar imagem: $e');
       return null;
     }
   }
 
-  Future<void> _handleShare(BuildContext context) async {
-    final bytes = await _capturePng();
-    if (bytes == null) {
-      _showError(context, "Erro ao gerar imagem.");
-      return;
+  Future<void> _handleShare() async {
+    try {
+      final bytes = await _capturePng();
+      if (!mounted) return;
+      if (bytes == null || bytes.isEmpty) {
+        _showError(context, 'Erro ao gerar imagem para compartilhar.');
+        return;
+      }
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/atividade_parque.png');
+      await file.writeAsBytes(bytes);
+      // sharePositionOrigin é obrigatório no iOS para ancorar o popover.
+      final box = _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
+      final origin = box != null
+          ? box.localToGlobal(Offset.zero) & box.size
+          : const Rect.fromLTWH(0, 0, 1, 1);
+      await Share.shareXFiles([XFile(file.path)], sharePositionOrigin: origin);
+    } catch (e) {
+      debugPrint('[Share] erro: $e');
+      if (!mounted) return;
+      _showError(context, 'Erro ao compartilhar.');
     }
-    final tempDir = await getTemporaryDirectory();
-    final file = await File('${tempDir.path}/atividade_share.png').create();
-    await file.writeAsBytes(bytes);
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      text: 'Minha atividade no App Parque 🌿',
-    );
   }
 
-  Future<void> _handleSave(BuildContext context) async {
+  Future<void> _handleSave() async {
     final bytes = await _capturePng();
+    if (!mounted) return;
     if (bytes == null) {
-      _showError(context, "Erro ao gerar imagem.");
+      _showError(context, 'Erro ao gerar imagem.');
       return;
     }
-    final tempDir = await getTemporaryDirectory();
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    final file =
-        await File('${tempDir.path}/atividade_$ts.png').create();
-    await file.writeAsBytes(bytes);
-    AppToast.show(context, 'Imagem salva temporariamente (simulação)', type: ToastType.success);
+    bool ok = false;
+    try {
+      final result = await ImageGallerySaver.saveImage(
+        bytes,
+        quality: 95,
+        name: 'atividade_parque_${DateTime.now().millisecondsSinceEpoch}',
+      );
+      ok = result != null &&
+          (result['isSuccess'] == true ||
+              result['isSuccess']?.toString() == 'true' ||
+              result['isSuccess'] == 1 ||
+              ((result['filePath'] ?? '').toString().isNotEmpty));
+    } catch (_) {
+      ok = false;
+    }
+    if (!mounted) return;
+    if (ok) {
+      AppToast.show(context, 'Imagem salva na galeria!', type: ToastType.success);
+    } else {
+      _showError(context, 'Não foi possível salvar na galeria.');
+    }
   }
 
   void _showError(BuildContext context, String msg) {

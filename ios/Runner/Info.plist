@@ -47,6 +47,11 @@
 	<string>Precisamos salvar imagens das suas atividades na galeria.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Precisamos de acesso à galeria para selecionar uma foto de perfil.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>comgooglemaps</string>
+		<string>waze</string>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
@@ -54,6 +59,7 @@
 		<string>remote-notification</string>
 		<string>fetch</string>
 		<string>bluetooth-peripheral</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>

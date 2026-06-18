@@ -28,12 +28,14 @@ class GoReservationRepository {
     required String dateStr,
     required String startTime,
     required List<Participant> participants,
+    int duracaoHoras = 1,
   }) async {
     try {
       final res = await _api.post('reservations', body: {
         'space_id': spaceId,
         'data': dateStr,
         'hora_inicio': startTime,
+        'duracao_horas': duracaoHoras,
         'participants': participants.map((p) => p.toJson()).toList(),
       });
 
@@ -88,6 +90,19 @@ class GoReservationRepository {
       return [];
     } catch (_) {
       return [];
+    }
+  }
+
+  /// Busca uma reserva pelo ID (usado ao abrir deeplink de notificação).
+  Future<Reservation?> getById(int id) async {
+    try {
+      final res = await _api.get('reservations/$id');
+      if (res.statusCode == 200) {
+        return Reservation.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+      }
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 

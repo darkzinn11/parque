@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 // Ocultamos 'Marker' do lottie para não conflitar com o do Google Maps
 import 'package:lottie/lottie.dart' hide Marker;
 
@@ -21,10 +22,24 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
   static const Color darkText = Color(0xFF32384A);
   static const Color lightText = Color(0xFF8F959E);
 
+  // Distância mínima (metros) para mover a câmera — 3m é suficiente para seguir suavemente
+  static const double _cameraMoveThresholdMeters = 3.0;
+
   final RunService run = RunService.instance;
   GoogleMapController? _mapController;
   bool _starting = true;
   String? _error;
+
+  // Flag para centralizar a câmera apenas uma vez no primeiro fix real
+  bool _initialCameraSet = false;
+
+  // Última posição onde a câmera foi centrada — evita animações desnecessárias
+  LatLng? _lastCameraLatLng;
+
+  // Sets persistentes de polylines e markers — não recriados a cada build().
+  // O GoogleMaps SDK compara por referência; recriar a cada frame causa piscar.
+  final Set<Polyline> _polylines = {};
+  final Set<Marker> _markers = {};
 
   @override
   void initState() {
@@ -53,15 +68,72 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
     }
   }
 
+  /// Chamado pelo RunService (via notifyListeners) a cada tick do timer (1s).
+  /// Atualiza polylines/markers nos campos persistentes e move a câmera
+  /// apenas quando necessário — sem jitter.
   void _onRunUpdated() {
     if (!mounted) return;
 
-    // Move a câmera automaticamente para seguir o usuário
-    if (_mapController != null && run.routeCoords.isNotEmpty) {
-      final last = run.routeCoords.last;
-      _mapController!.animateCamera(
-        CameraUpdate.newLatLngZoom(last, 16),
-      );
+    final coords = run.routeCoords;
+    final hasRoute = coords.isNotEmpty;
+
+    // ── Atualiza Polyline no campo persistente ─────────────────────────
+    _polylines
+      ..clear()
+      ..add(Polyline(
+        polylineId: const PolylineId('route'),
+        points: List<LatLng>.from(coords), // snapshot imutável
+        width: 6,
+        color: primaryGreen,
+      ));
+
+    // ── Atualiza Markers no campo persistente ──────────────────────────
+    // O SDK reutiliza markers com o mesmo MarkerId em vez de remove+add,
+    // eliminando o piscar do marcador atual.
+    _markers.clear();
+    if (hasRoute) {
+      _markers.add(Marker(
+        markerId: const MarkerId('start'),
+        position: coords.first,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+      ));
+      _markers.add(Marker(
+        markerId: const MarkerId('current'),
+        position: coords.last,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      ));
+    }
+
+    // ── Move câmera apenas quando necessário ──────────────────────────
+    if (_mapController != null && hasRoute) {
+      final last = coords.last;
+
+      if (!_initialCameraSet) {
+        // Primeira posição real — centraliza com animação
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLngZoom(last, 16),
+        );
+        _initialCameraSet = true;
+        _lastCameraLatLng = last;
+      } else if (_lastCameraLatLng != null) {
+        final dist = Geolocator.distanceBetween(
+          _lastCameraLatLng!.latitude,
+          _lastCameraLatLng!.longitude,
+          last.latitude,
+          last.longitude,
+        );
+
+        // Só move quando o usuário saiu do centro por mais de 15m —
+        // elimina o jitter de câmera causado por micro-movimentos do GPS.
+        // Usa moveCamera (sem animação) para não interferir com gestos do usuário.
+        if (dist > _cameraMoveThresholdMeters) {
+          // Usa newLatLng sem forçar zoom — preserva o zoom do usuário
+          _mapController!.moveCamera(
+            CameraUpdate.newLatLng(last),
+          );
+          _lastCameraLatLng = last;
+        }
+      }
     }
 
     setState(() {});
@@ -104,16 +176,16 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
                     repeat: true,
                     errorBuilder: (context, error, stackTrace) {
                       return const Icon(
-                        Icons.check_circle_outline, 
-                        size: 80, 
-                        color: primaryGreen
+                        Icons.check_circle_outline,
+                        size: 80,
+                        color: primaryGreen,
                       );
                     },
                   ),
                 ),
-                
+
                 const SizedBox(height: 24),
-                
+
                 const Text(
                   'Sucesso!',
                   style: TextStyle(
@@ -132,9 +204,9 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
                     height: 1.4,
                   ),
                 ),
-                
+
                 const SizedBox(height: 32),
-                
+
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -168,7 +240,6 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
 
     // 3. Após fechar o modal, volta para a tela anterior COM SINAL DE SUCESSO (true)
     if (mounted) {
-      // Alterado aqui: passamos true
       Navigator.of(context).pop(true);
     }
   }
@@ -198,6 +269,9 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
       ),
       body: Stack(
         children: [
+          // GoogleMap recebe os Sets persistentes — não recriados a cada build().
+          // onMapCreated não move câmera para evitar race condition com GPS frio:
+          // a câmera é centralizada no primeiro fix real dentro de _onRunUpdated().
           GoogleMap(
             initialCameraPosition: CameraPosition(
               target: initialPos,
@@ -205,39 +279,12 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
             ),
             myLocationEnabled: true,
             myLocationButtonEnabled: true,
-            polylines: {
-              Polyline(
-                polylineId: const PolylineId('route'),
-                points: run.routeCoords,
-                width: 6,
-                color: primaryGreen,
-              ),
-            },
-            markers: {
-              if (hasRoute)
-                Marker(
-                  markerId: const MarkerId('start'),
-                  position: run.routeCoords.first,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                    BitmapDescriptor.hueGreen,
-                  ),
-                ),
-              if (hasRoute)
-                Marker(
-                  markerId: const MarkerId('current'),
-                  position: run.routeCoords.last,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                    BitmapDescriptor.hueRed,
-                  ),
-                ),
-            },
+            polylines: _polylines,
+            markers: _markers,
             onMapCreated: (controller) {
               _mapController = controller;
-              if (hasRoute) {
-                _mapController!.moveCamera(
-                  CameraUpdate.newLatLngZoom(run.routeCoords.last, 16),
-                );
-              }
+              // Não move câmera aqui — GPS pode ainda não ter fix.
+              // O primeiro fix real é detectado em _onRunUpdated() via _initialCameraSet.
             },
           ),
 
@@ -289,26 +336,39 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
       ),
       child: Column(
         children: [
-          // Linha "Gravando..."
+          // Linha de status — "Gravando" ou "Aguardando GPS"
           Row(
             children: [
               Container(
                 width: 8,
                 height: 8,
-                decoration: const BoxDecoration(
-                  color: primaryGreen,
+                decoration: BoxDecoration(
+                  color: run.awaitingGpsFix ? Colors.orange : primaryGreen,
                   shape: BoxShape.circle,
                 ),
               ),
               const SizedBox(width: 8),
-              const Text(
-                'Gravando atividade',
+              Text(
+                run.awaitingGpsFix
+                    ? 'Aguardando sinal GPS...'
+                    : 'Gravando atividade',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: lightText,
+                  color: run.awaitingGpsFix ? Colors.orange : lightText,
                 ),
               ),
+              if (run.awaitingGpsFix) ...[
+                const SizedBox(width: 6),
+                const SizedBox(
+                  width: 10,
+                  height: 10,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: Colors.orange,
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 12),
@@ -377,7 +437,12 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
 
   String _formatPace(String raw) {
     if (raw.isEmpty || raw == '--') return '--';
-    var v = raw.toLowerCase().replaceAll('min/km', '').replaceAll('min', '').replaceAll('km', '').trim();
+    var v = raw
+        .toLowerCase()
+        .replaceAll('min/km', '')
+        .replaceAll('min', '')
+        .replaceAll('km', '')
+        .trim();
     if (v.endsWith('/km')) return v;
     return '$v /km';
   }
@@ -401,8 +466,10 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
               foregroundColor: darkText,
               side: const BorderSide(color: primaryGreen),
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
-              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(32)),
+              textStyle:
+                  const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             child: Text(isPaused ? 'Retomar' : 'Pausar'),
           ),
@@ -415,8 +482,10 @@ class _RunTrackingScreenState extends State<RunTrackingScreen> {
               backgroundColor: primaryGreen,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
-              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(32)),
+              textStyle:
+                  const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
             ),
             child: const Text('Encerrar'),
           ),

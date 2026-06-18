@@ -29,6 +29,11 @@ import '../data/models/map_focus.dart';
 // ===== Eventos
 import '../screens/eventos_list_screen.dart';
 import '../screens/evento_detail_screen.dart';
+import '../screens/events/event_park_selection_screen.dart';
+import '../screens/events/event_request_screen.dart';
+import '../screens/events/event_details_screen.dart';
+import '../screens/events/my_event_requests_screen.dart';
+import '../screens/events/event_request_success_screen.dart';
 // ===== Informações
 import '../screens/informacoes_screen.dart';
 import '../screens/denuncie_screen.dart';
@@ -186,6 +191,72 @@ final GoRouter appRouter = GoRouter(
                     key: state.pageKey,
                     child: const EventosListScreen(),
                   ),
+                  routes: [
+                    // Fluxo de solicitação de evento (2 telas)
+                    GoRoute(
+                      path: 'solicitar',
+                      name: 'evento_solicitar_parque',
+                      pageBuilder: (context, state) => _sharedAxisPage(
+                        key: state.pageKey,
+                        child: const EventParkSelectionScreen(),
+                      ),
+                      routes: [
+                        GoRoute(
+                          path: ':parkId',
+                          name: 'evento_solicitar',
+                          pageBuilder: (context, state) {
+                            final parkId = int.parse(state.pathParameters['parkId']!);
+                            return _sharedAxisPage(
+                              key: state.pageKey,
+                              child: EventRequestScreen(parkId: parkId),
+                            );
+                          },
+                          routes: [
+                            GoRoute(
+                              path: 'detalhes',
+                              name: 'evento_solicitar_detalhes',
+                              pageBuilder: (context, state) {
+                                final extra = state.extra as Map<String, dynamic>? ?? {};
+                                final rawIds = extra['spaceIds'];
+                                final spaceIds = rawIds is List
+                                    ? rawIds.whereType<int>().toList()
+                                    : <int>[];
+                                return _sharedAxisPage(
+                                  key: state.pageKey,
+                                  child: EventDetailsScreen(
+                                    parkId: extra['parkId'] as int? ??
+                                        int.parse(state.pathParameters['parkId']!),
+                                    spaceIds: spaceIds,
+                                    dataEvento: extra['data']?.toString() ?? '',
+                                    horaInicio: extra['horaInicio']?.toString() ?? '',
+                                    horaFim: extra['horaFim']?.toString() ?? '',
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    // Meus pedidos de evento (rota standalone)
+                    GoRoute(
+                      path: 'meus-pedidos',
+                      name: 'evento_meus_pedidos',
+                      pageBuilder: (context, state) => _sharedAxisPage(
+                        key: state.pageKey,
+                        child: const MyEventRequestsScreen(),
+                      ),
+                    ),
+                    // Tela de sucesso após envio
+                    GoRoute(
+                      path: 'sucesso',
+                      name: 'evento_sucesso',
+                      pageBuilder: (context, state) => _sharedAxisPage(
+                        key: state.pageKey,
+                        child: const EventRequestSuccessScreen(),
+                      ),
+                    ),
+                  ],
                 ),
                 GoRoute(
                   path: 'info',
@@ -337,12 +408,28 @@ final GoRouter appRouter = GoRouter(
                   ),
                 ),
                 GoRoute(
+                  path: 'meus-pedidos-evento',
+                  name: 'user_event_requests',
+                  pageBuilder: (context, state) => _sharedAxisPage(
+                    key: state.pageKey,
+                    child: const MyEventRequestsScreen(),
+                  ),
+                ),
+                // Alias para deeplink legado enviado por versões antigas do backend
+                GoRoute(
+                  path: 'meus-eventos',
+                  redirect: (_, __) => '/tabs/user/meus-pedidos-evento',
+                ),
+                GoRoute(
                   path: 'minhas-reservas/:id/editar',
                   name: 'user_reservation_edit',
                   pageBuilder: (context, state) => _sharedAxisPage(
                     key: state.pageKey,
                     child: ReservationFormScreen(
                       reservation: state.extra as Reservation?,
+                      reservationId: int.tryParse(
+                        state.pathParameters['id'] ?? '',
+                      ),
                     ),
                   ),
                 ),

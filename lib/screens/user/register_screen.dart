@@ -244,6 +244,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       phone: _phone.text.trim(),
       cpf: _cpf.text.replaceAll(RegExp(r'\D'), ''),
       cidade: _cidade.text.trim(),
+      cep: _cep.text.replaceAll(RegExp(r'\D'), ''),
+      rua: _rua.text.trim(),
+      numero: _numero.text.trim(),
+      complemento: _complemento.text.trim(),
+      bairro: _bairro.text.trim(),
     );
 
     if (!mounted) return;

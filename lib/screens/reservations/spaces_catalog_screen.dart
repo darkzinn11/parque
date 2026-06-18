@@ -61,6 +61,7 @@ class _SpacesCatalogScreenState extends State<SpacesCatalogScreen> {
     final spaces = await _repository.fetchSpaces(
       category: selectedCategoryKey,
       parkId: widget.parkId,
+      permiteReserva: true,
     );
     
     if (mounted) {

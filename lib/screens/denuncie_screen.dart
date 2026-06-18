@@ -8,11 +8,14 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
+import 'package:geolocator/geolocator.dart';
+
 import '../core/api/api_client.dart';
 import '../core/api/api_config.dart';
 import '../core/formatters.dart';
+import '../data/models/park.dart';
+import '../data/repositories/go_park_repository.dart';
 import '../services/auth_service.dart';
-import '../services/cep_service.dart';
 import '../widgets/app_toast.dart';
 
 const kBrandGreen = Color(0xFF669340);
@@ -36,19 +39,21 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   final _nomeController = TextEditingController();
   final _celularController = TextEditingController();
 
-  // Endereço do denunciante (lazy — criados ao ativar o switch)
-  bool _informarEndereco = false;
-  TextEditingController? _cepController;
-  TextEditingController? _ruaController;
-  TextEditingController? _numeroController;
-  TextEditingController? _complementoController;
-  TextEditingController? _bairroController;
+  // Localização do denunciante (GPS — opcional)
+  double? _latitude;
+  double? _longitude;
+  String? _enderecoCapturado;
+  bool _loadingGps = false;
 
-  // Local da denúncia
-  final _cepLocalController = TextEditingController();
-  final _cidadeController = TextEditingController();
-  final _enderecoDenunciaController = TextEditingController();
-  final _pontoReferenciaController = TextEditingController();
+  // Local da denúncia — agora só parque + local específico opcional
+  final _localEspecificoController = TextEditingController();
+
+  // Parque relacionado (obrigatório)
+  int? _selectedParkId;
+  List<Park> _parks = [];
+  bool _loadingParks = false;
+  bool _parkDropdownOpen = false;
+  bool _categoriaDropdownOpen = false;
 
   // Detalhes
   String _categoria = 'Infraestrutura';
@@ -62,10 +67,6 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   bool _informacoesVerdadeiras = false;
 
   bool _enviando = false;
-  bool _loadingCepEndereco = false;
-  bool _loadingCepLocal = false;
-  int _cepEnderecoSeq = 0;
-  int _cepLocalSeq = 0;
 
   static const _categorias = [
     'Infraestrutura',
@@ -83,15 +84,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     _emailController.dispose();
     _nomeController.dispose();
     _celularController.dispose();
-    _cepController?.dispose();
-    _ruaController?.dispose();
-    _numeroController?.dispose();
-    _complementoController?.dispose();
-    _bairroController?.dispose();
-    _cepLocalController.dispose();
-    _cidadeController.dispose();
-    _enderecoDenunciaController.dispose();
-    _pontoReferenciaController.dispose();
+    _localEspecificoController.dispose();
     _descricaoController.dispose();
     AuthService.instance.removeListener(_onAuthChanged);
     super.dispose();
@@ -101,8 +94,20 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   void initState() {
     super.initState();
     _preencherDadosUsuario();
+    _loadParks();
     // Ouve login feito enquanto a tela já estava na pilha
     AuthService.instance.addListener(_onAuthChanged);
+  }
+
+  Future<void> _loadParks() async {
+    setState(() => _loadingParks = true);
+    final parks = await GoParkRepository().fetchAll();
+    if (mounted) {
+      setState(() {
+        _parks = parks;
+        _loadingParks = false;
+      });
+    }
   }
 
   void _onAuthChanged() {
@@ -121,55 +126,72 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     _celularController.text = user['telefone']?.toString() ?? '';
   }
 
-  // ── CEP ───────────────────────────────────────────────────────────────────────
+  // ── GPS ───────────────────────────────────────────────────────────────────────
 
-  Future<void> _onCepEnderecoChanged(String value) async {
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.length != 8) return;
-
-    final seq = ++_cepEnderecoSeq;
-    setState(() => _loadingCepEndereco = true);
-    final result = await CepService.fetch(digits);
-    if (!mounted || seq != _cepEnderecoSeq) return;
-    setState(() => _loadingCepEndereco = false);
-
-    if (result == null) {
-      AppToast.show(context, 'CEP não encontrado.', type: ToastType.warning);
-      return;
+  Future<void> _capturarLocalizacao() async {
+    setState(() => _loadingGps = true);
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        AppToast.show(
+          context,
+          permission == LocationPermission.deniedForever
+              ? 'Permissão bloqueada. Ative nas configurações do app.'
+              : 'Permissão de localização negada.',
+          type: ToastType.warning,
+        );
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      final endereco = await _reverseGeocode(pos.latitude, pos.longitude);
+      if (!mounted) return;
+      setState(() {
+        _latitude = pos.latitude;
+        _longitude = pos.longitude;
+        _enderecoCapturado = endereco;
+      });
+      AppToast.show(context, 'Localização capturada!', type: ToastType.success);
+    } catch (_) {
+      if (!mounted) return;
+      AppToast.show(context, 'Erro ao capturar localização.', type: ToastType.error);
+    } finally {
+      if (mounted) setState(() => _loadingGps = false);
     }
-    _ruaController?.text = result.logradouro;
-    _bairroController?.text = result.bairro;
   }
 
-  Future<void> _onCepLocalChanged(String value) async {
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.length != 8) return;
-
-    final seq = ++_cepLocalSeq;
-    setState(() => _loadingCepLocal = true);
-    final result = await CepService.fetch(digits);
-    if (!mounted || seq != _cepLocalSeq) return;
-    setState(() => _loadingCepLocal = false);
-
-    if (result == null) {
-      AppToast.show(context, 'CEP não encontrado.', type: ToastType.warning);
-      return;
+  Future<String?> _reverseGeocode(double lat, double lon) async {
+    try {
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&accept-language=pt-BR',
+      );
+      final res = await http.get(uri, headers: {'User-Agent': 'VemProParque/1.0'})
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final addr = data['address'] as Map<String, dynamic>?;
+      if (addr == null) return data['display_name'] as String?;
+      final parts = <String>[
+        if (addr['road'] != null) addr['road'] as String,
+        if (addr['suburb'] != null)
+          addr['suburb'] as String
+        else if (addr['neighbourhood'] != null)
+          addr['neighbourhood'] as String,
+        if (addr['city'] != null)
+          addr['city'] as String
+        else if (addr['town'] != null)
+          addr['town'] as String,
+      ];
+      return parts.isNotEmpty ? parts.join(', ') : null;
+    } catch (_) {
+      return null;
     }
-    _cidadeController.text = '${result.localidade} - ${result.uf}';
-    if (_enderecoDenunciaController.text.isEmpty) {
-      _enderecoDenunciaController.text = result.logradouro;
-    }
-  }
-
-  void _toggleEndereco(bool val) {
-    if (val && _cepController == null) {
-      _cepController = TextEditingController();
-      _ruaController = TextEditingController();
-      _numeroController = TextEditingController();
-      _complementoController = TextEditingController();
-      _bairroController = TextEditingController();
-    }
-    setState(() => _informarEndereco = val);
   }
 
   // ── Upload de fotos ──────────────────────────────────────────────────────────
@@ -203,6 +225,12 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    if (_selectedParkId == null) {
+      AppToast.show(context, 'Selecione o parque da denúncia.',
+          type: ToastType.warning);
+      return;
+    }
+
     if (!_concordoTermos || !_informacoesVerdadeiras) {
       AppToast.show(
         context,
@@ -222,24 +250,23 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
         if (url != null) fotosUrls.add(url);
       }
 
+      final selectedPark = _parks.where((p) => p.id == _selectedParkId).firstOrNull;
       final body = <String, dynamic>{
         'email': _emailController.text.trim(),
         'nome': _nomeController.text.trim(),
         'celular': _celularController.text.trim(),
-        'cidade_denuncia': _cidadeController.text.trim(),
-        'endereco_denuncia': _enderecoDenunciaController.text.trim(),
-        'ponto_referencia': _pontoReferenciaController.text.trim(),
+        'cidade_denuncia': selectedPark?.name ?? '',
+        'endereco_denuncia': selectedPark?.name ?? '',
+        'ponto_referencia': _localEspecificoController.text.trim(),
         'categoria': _categoria,
         'descricao': _descricaoController.text.trim(),
         'fotos': fotosUrls,
+        if (_selectedParkId != null) 'park_id': _selectedParkId,
       };
 
-      if (_informarEndereco) {
-        body['cep'] = _cepController?.text.trim() ?? '';
-        body['rua'] = _ruaController?.text.trim() ?? '';
-        body['numero'] = _numeroController?.text.trim() ?? '';
-        body['complemento'] = _complementoController?.text.trim() ?? '';
-        body['bairro'] = _bairroController?.text.trim() ?? '';
+      if (_latitude != null) {
+        body['latitude'] = _latitude;
+        body['longitude'] = _longitude;
       }
 
       final response = await ApiClient().post('denuncias', body: body);
@@ -425,80 +452,82 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                 ),
               ),
 
-              // 2. Endereço (opcional)
+              // 2. Minha localização (GPS — opcional)
               _buildCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Informar meu endereço',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: kDarkGray,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Opcional. Selecione para informar.',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  color: const Color(0xFF9CA3AF),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Switch.adaptive(
-                          value: _informarEndereco,
-                          thumbColor: WidgetStateProperty.all(Colors.white),
-                          trackColor: WidgetStateProperty.resolveWith((states) =>
-                              states.contains(WidgetState.selected)
-                                  ? kBrandGreen
-                                  : const Color(0xFFE5E7EB)),
-                          onChanged: _toggleEndereco,
-                        ),
-                      ],
+                    _buildSectionHeader(Icons.my_location_outlined, 'Minha localização'),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Opcional. Ajuda os gestores a localizar a sua área.',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: kSubtitleColor,
+                      ),
                     ),
-                    if (_informarEndereco) ...[
-                      const SizedBox(height: 20),
-                      _buildField(
-                        hint: 'CEP',
-                        controller: _cepController!,
-                        type: TextInputType.number,
-                        formatters: [CepFormatter()],
-                        onChanged: _onCepEnderecoChanged,
-                        suffixLoading: _loadingCepEndereco,
-                      ),
-                      _buildField(hint: 'Rua', controller: _ruaController!),
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 35,
-                            child: _buildField(
-                              hint: 'Número',
-                              controller: _numeroController!,
-                              type: TextInputType.number,
+                    const SizedBox(height: 16),
+                    if (_latitude != null) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          border: Border.all(color: kBrandGreen.withValues(alpha: 0.3)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.check_circle_outline, color: kBrandGreen, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _enderecoCapturado ?? 'Localização capturada',
+                                style: GoogleFonts.poppins(fontSize: 13, color: kDarkGray),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            flex: 65,
-                            child: _buildField(
-                              hint: 'Complemento',
-                              controller: _complementoController!,
+                            TextButton(
+                              onPressed: () => setState(() {
+                                _latitude = null;
+                                _longitude = null;
+                                _enderecoCapturado = null;
+                              }),
+                              style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                minimumSize: const Size(60, 36),
+                              ),
+                              child: Text(
+                                'Remover',
+                                style: GoogleFonts.poppins(fontSize: 12, color: Colors.red),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                      _buildField(hint: 'Bairro', controller: _bairroController!),
+                    ] else ...[
+                      OutlinedButton.icon(
+                        onPressed: _loadingGps ? null : _capturarLocalizacao,
+                        icon: _loadingGps
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: kBrandGreen,
+                                ),
+                              )
+                            : const Icon(Icons.my_location, color: kBrandGreen),
+                        label: Text(
+                          _loadingGps ? 'Capturando...' : 'Usar minha localização',
+                          style: GoogleFonts.poppins(fontSize: 14, color: kBrandGreen),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: kBrandGreen),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
                     ],
                   ],
                 ),
@@ -512,29 +541,150 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                     _buildSectionHeader(
                         Icons.location_on_outlined, 'Local da denúncia'),
                     const SizedBox(height: 20),
-                    _buildField(
-                      hint: 'CEP do local (opcional)',
-                      controller: _cepLocalController,
-                      type: TextInputType.number,
-                      formatters: [CepFormatter()],
-                      onChanged: _onCepLocalChanged,
-                      suffixLoading: _loadingCepLocal,
+                    // Parque (obrigatório) — dropdown customizado inline
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: kBrandGreen, width: 2),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Column(
+                        children: [
+                          // Trigger
+                          GestureDetector(
+                            onTap: _loadingParks
+                                ? null
+                                : () => setState(
+                                    () => _parkDropdownOpen = !_parkDropdownOpen),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 14),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.park_outlined,
+                                      color: _selectedParkId != null
+                                          ? kBrandGreen
+                                          : kSubtitleColor,
+                                      size: 20),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _loadingParks
+                                        ? Text(
+                                            'Carregando parques...',
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 14,
+                                                color: kSubtitleColor),
+                                          )
+                                        : Text(
+                                            _selectedParkId != null
+                                                ? _parks
+                                                    .firstWhere((p) =>
+                                                        p.id == _selectedParkId)
+                                                    .name
+                                                : 'Selecione o parque',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 14,
+                                              fontWeight: _selectedParkId != null
+                                                  ? FontWeight.w500
+                                                  : FontWeight.w400,
+                                              color: _selectedParkId != null
+                                                  ? kDarkGray
+                                                  : kSubtitleColor,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                  ),
+                                  if (_loadingParks)
+                                    const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: kBrandGreen),
+                                    )
+                                  else
+                                    AnimatedRotation(
+                                      turns: _parkDropdownOpen ? 0.5 : 0,
+                                      duration:
+                                          const Duration(milliseconds: 200),
+                                      child: const Icon(
+                                          Icons.keyboard_arrow_down,
+                                          color: kDarkGray),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          // Lista de opções
+                          if (_parkDropdownOpen) ...[
+                            Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: kBrandGreen.withValues(alpha: 0.3)),
+                            ConstrainedBox(
+                              constraints:
+                                  const BoxConstraints(maxHeight: 220),
+                              child: ListView.separated(
+                                shrinkWrap: true,
+                                padding: EdgeInsets.zero,
+                                itemCount: _parks.length,
+                                separatorBuilder: (_, __) => Divider(
+                                  height: 1,
+                                  thickness: 1,
+                                  color: kBrandGreen.withValues(alpha: 0.15),
+                                ),
+                                itemBuilder: (_, i) {
+                                  final p = _parks[i];
+                                  final selected = p.id == _selectedParkId;
+                                  return InkWell(
+                                    onTap: () => setState(() {
+                                      _selectedParkId = p.id;
+                                      _parkDropdownOpen = false;
+                                    }),
+                                    child: ColoredBox(
+                                      color: selected
+                                          ? kBrandGreen.withValues(alpha: 0.06)
+                                          : Colors.white,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 13),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                p.name,
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 14,
+                                                  fontWeight: selected
+                                                      ? FontWeight.w600
+                                                      : FontWeight.w400,
+                                                  color: selected
+                                                      ? kBrandGreen
+                                                      : kDarkGray,
+                                                ),
+                                              ),
+                                            ),
+                                            if (selected)
+                                              const Icon(Icons.check,
+                                                  color: kBrandGreen, size: 18),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ],
+                        ),
+                      ),
                     ),
+                    // Local específico (opcional)
                     _buildField(
-                      hint: 'Cidade da denúncia',
-                      controller: _cidadeController,
-                      validator: (v) =>
-                          v == null || v.trim().isEmpty ? 'Informe a cidade' : null,
-                    ),
-                    _buildField(
-                      hint: 'Endereço da denúncia',
-                      controller: _enderecoDenunciaController,
-                      validator: (v) =>
-                          v == null || v.trim().isEmpty ? 'Informe o endereço' : null,
-                    ),
-                    _buildField(
-                      hint: 'Ponto de referência (opcional)',
-                      controller: _pontoReferenciaController,
+                      hint: 'Local específico no parque (opcional)',
+                      controller: _localEspecificoController,
                     ),
                   ],
                 ),
@@ -549,24 +699,106 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                         Icons.assignment_outlined, 'Detalhes e anexos'),
                     const SizedBox(height: 20),
 
-                    // Categoria
+                    // Categoria — dropdown customizado inline
                     Container(
                       margin: const EdgeInsets.only(bottom: 12),
-                      child: DropdownButtonFormField<String>(
-                        value: _categoria,
-                        decoration: _inputDecoration('Categoria'),
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: kDarkGray,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: kBrandGreen, width: 2),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Column(
+                        children: [
+                          // Trigger
+                          GestureDetector(
+                            onTap: () => setState(() =>
+                                _categoriaDropdownOpen = !_categoriaDropdownOpen),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 14),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _categoria,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: kDarkGray,
+                                      ),
+                                    ),
+                                  ),
+                                  AnimatedRotation(
+                                    turns: _categoriaDropdownOpen ? 0.5 : 0,
+                                    duration: const Duration(milliseconds: 200),
+                                    child: const Icon(Icons.keyboard_arrow_down,
+                                        color: kDarkGray),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          // Lista de opções
+                          if (_categoriaDropdownOpen) ...[
+                            Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: kBrandGreen.withValues(alpha: 0.3)),
+                            ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              padding: EdgeInsets.zero,
+                              itemCount: _categorias.length,
+                              separatorBuilder: (_, __) => Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: kBrandGreen.withValues(alpha: 0.15),
+                              ),
+                              itemBuilder: (_, i) {
+                                final c = _categorias[i];
+                                final selected = c == _categoria;
+                                return InkWell(
+                                  onTap: () => setState(() {
+                                    _categoria = c;
+                                    _categoriaDropdownOpen = false;
+                                  }),
+                                  child: ColoredBox(
+                                    color: selected
+                                        ? kBrandGreen.withValues(alpha: 0.06)
+                                        : Colors.white,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 13),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              c,
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 14,
+                                                fontWeight: selected
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w400,
+                                                color: selected
+                                                    ? kBrandGreen
+                                                    : kDarkGray,
+                                              ),
+                                            ),
+                                          ),
+                                          if (selected)
+                                            const Icon(Icons.check,
+                                                color: kBrandGreen, size: 18),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ],
                         ),
-                        dropdownColor: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        items: _categorias
-                            .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                            .toList(),
-                        onChanged: (v) => setState(() => _categoria = v!),
-                        validator: (v) => v == null ? 'Selecione uma categoria' : null,
                       ),
                     ),
 
@@ -652,7 +884,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                                                       Container(
                                                     width: 80,
                                                     height: 80,
-                                                    color: const Color(0xFFF5F7EB),
+                                                    color: Colors.white,
                                                     child: const Icon(
                                                         Icons.image_outlined,
                                                         color: kBrandGreen),
@@ -815,7 +1047,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
               )
             : null,
         filled: true,
-        fillColor: const Color(0xFFFAFBF0),
+        fillColor: Colors.white,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         border: OutlineInputBorder(

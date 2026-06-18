@@ -132,7 +132,12 @@ class _UserScreenState extends State<UserScreen> {
                 onTap: () => context.push('/tabs/user/minhas-reservas'),
               ),
               _Item(
-                icon: Icons.settings_outlined, 
+                icon: Icons.event_note_outlined,
+                title: 'Meus pedidos de evento',
+                onTap: () => context.push('/tabs/user/meus-pedidos-evento'),
+              ),
+              _Item(
+                icon: Icons.settings_outlined,
                 title: 'Preferências',
                 onTap: () {
                   Navigator.of(context).push(
@@ -147,19 +152,12 @@ class _UserScreenState extends State<UserScreen> {
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: _green,
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16), 
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8), 
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                onPressed: () async {
-                  await AuthService.instance.logout();
-                  widget.onChanged?.call();
-                  if (context.mounted) {
-                    AppToast.show(context, 'Você saiu da conta.', type: ToastType.warning);
-                    context.go('/tabs/user');
-                  }
-                },
+                onPressed: () => _showLogoutSheet(context),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -179,6 +177,24 @@ class _UserScreenState extends State<UserScreen> {
           ),
         );
       },
+    );
+  }
+
+  void _showLogoutSheet(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => _LogoutConfirmScreen(
+          onConfirm: () async {
+            await AuthService.instance.logout();
+            widget.onChanged?.call();
+            if (context.mounted) {
+              AppToast.show(context, 'Você saiu da conta.', type: ToastType.warning);
+              context.go('/tabs/user');
+            }
+          },
+        ),
+      ),
     );
   }
 }
@@ -353,6 +369,100 @@ class _AvatarEditState extends State<_AvatarEdit> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _LogoutConfirmScreen extends StatelessWidget {
+  const _LogoutConfirmScreen({required this.onConfirm});
+  final Future<void> Function() onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            children: [
+              const Spacer(),
+              Text(
+                'Sair agora?',
+                style: GoogleFonts.poppins(
+                  color: _green,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 32),
+              Image.asset(
+                'assets/images/sair.png',
+                height: 220,
+                fit: BoxFit.contain,
+              ),
+              const SizedBox(height: 32),
+              Text(
+                'Você precisará fazer login novamente\npara acessar sua conta.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  color: Colors.black54,
+                  fontSize: 15,
+                  height: 1.5,
+                ),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _green,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(
+                    'Cancelar',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red, width: 1.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: () async {
+                    Navigator.of(context).pop();
+                    await onConfirm();
+                  },
+                  icon: const Icon(Icons.logout_rounded, size: 20),
+                  label: Text(
+                    'Sair',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
       ),
     );
   }

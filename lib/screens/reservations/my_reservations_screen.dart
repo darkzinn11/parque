@@ -72,9 +72,17 @@ class _MyReservationsScreenState extends State<MyReservationsScreen>
       .where((r) => ['Pendente', 'Aprovada', 'Rejeitada'].contains(r.status))
       .toList();
 
-  List<Reservation> get _historico => _reservations
-      .where((r) => ['Expirada', 'Cancelada'].contains(r.status))
-      .toList();
+  List<Reservation> get _historico {
+    final list = _reservations
+        .where((r) => ['Expirada', 'Cancelada'].contains(r.status))
+        .toList();
+    list.sort((a, b) {
+      final dateCmp = b.data.compareTo(a.data);
+      if (dateCmp != 0) return dateCmp;
+      return b.horaInicio.compareTo(a.horaInicio);
+    });
+    return list;
+  }
 
   Future<void> _goEdit(Reservation r) async {
     await context.push('/tabs/user/minhas-reservas/${r.id}/editar', extra: r);
@@ -155,15 +163,15 @@ class _MyReservationsScreenState extends State<MyReservationsScreen>
           : TabBarView(
               controller: _tabController,
               children: [
-                _buildList(_atuais, paginated: false),
-                _buildList(_historico, paginated: true),
+                _buildList(_atuais, paginated: false, isHistory: false),
+                _buildList(_historico, paginated: true, isHistory: true),
               ],
             ),
     );
   }
 
-  Widget _buildList(List<Reservation> list, {required bool paginated}) {
-    if (list.isEmpty) return _buildEmpty();
+  Widget _buildList(List<Reservation> list, {required bool paginated, required bool isHistory}) {
+    if (list.isEmpty) return _buildEmpty(isHistory: isHistory);
 
     final visible = paginated
         ? list.take(_historicoPage * _pageSize).toList()
@@ -207,27 +215,33 @@ class _MyReservationsScreenState extends State<MyReservationsScreen>
     );
   }
 
-  Widget _buildEmpty() {
-    return ListView(
-      children: [
-        const SizedBox(height: 100),
-        Icon(Icons.event_note_outlined, size: 56, color: _lightGray.withValues(alpha: 0.5)),
-        const SizedBox(height: 16),
-        Center(
-          child: Text(
-            'Nenhuma reserva aqui',
-            style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: _dark),
-          ),
+  Widget _buildEmpty({bool isHistory = false}) {
+    final title = isHistory ? 'Nenhum histórico ainda' : 'Nenhuma reserva aqui';
+    final subtitle = isHistory
+        ? 'Suas reservas concluídas, canceladas e\nexpiradas aparecerão aqui.'
+        : 'Reserve um espaço pela tela de\nReservas na Home.';
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.event_note_outlined, size: 64, color: _lightGray.withValues(alpha: 0.4)),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: _dark),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 13, color: _lightGray, height: 1.5),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        Center(
-          child: Text(
-            'Reserve um espaço pela tela de Reservas na Home.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(fontSize: 13, color: _lightGray),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -387,6 +401,33 @@ class _ReservationCardState extends State<_ReservationCard> {
                     Expanded(
                       child: Text(
                         'Motivo: ${r.motivoRejeicao}',
+                        style: GoogleFonts.poppins(fontSize: 12, color: _dark, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // Motivo de cancelamento (só quando cancelado pelo gestor)
+            if (r.status == 'Cancelada' &&
+                r.canceladoPor == 'gestor' &&
+                r.motivoCancelamento.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.info_outline, size: 14, color: Color(0xFFF57C00)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Cancelado pelo parque. Motivo: ${r.motivoCancelamento}',
                         style: GoogleFonts.poppins(fontSize: 12, color: _dark, height: 1.4),
                       ),
                     ),

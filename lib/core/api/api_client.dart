@@ -83,12 +83,21 @@ class ApiClient {
     );
   }
 
-  Future<http.Response> delete(String path) async {
+  Future<http.Response> delete(String path, {dynamic body}) async {
     final uri = _buildUri(path);
     final headers = await _getHeaders();
-    
+
     if (kDebugMode) print('🚀 [DELETE] $uri');
-    
+
+    if (body != null) {
+      return http.Response.fromStream(
+        await http.Client().send(
+          http.Request('DELETE', uri)
+            ..headers.addAll(headers)
+            ..body = jsonEncode(body),
+        ),
+      );
+    }
     return _client.delete(uri, headers: headers);
   }
 }

@@ -1,4 +1,6 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_html/flutter_html.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +8,8 @@ import 'package:provider/provider.dart';
 import '../data/repositories/event_repository.dart';
 import '../data/models/app_event.dart';
 import '../core/api/api_config.dart';
+import '../services/auth_service.dart';
+import '../widgets/app_toast.dart';
 
 const kBrandGreen = Color(0xFF669340);
 const kDarkGray   = Color(0xFF32384A);
@@ -20,6 +24,9 @@ class EventoDetailScreen extends StatefulWidget {
 
 class _EventoDetailScreenState extends State<EventoDetailScreen> {
   late Future<AppEvent?> _future;
+  bool _meuInteresse = false;
+  bool _loadingInteresse = false;
+  bool _interesseInitialized = false;
 
   @override
   void initState() {
@@ -30,6 +37,27 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
   void _loadData() {
     final repo = context.read<EventRepository>();
     _future = repo.fetchById(widget.eventId);
+  }
+
+  Future<void> _toggleInteresse() async {
+    if (AuthService.instance.tokenSync == null) {
+      AppToast.show(context, 'Faça login para registrar interesse',
+          type: ToastType.warning);
+      return;
+    }
+    final repo = context.read<EventRepository>();
+    setState(() => _loadingInteresse = true);
+    try {
+      await repo.toggleInteresse(widget.eventId, !_meuInteresse);
+      setState(() => _meuInteresse = !_meuInteresse);
+    } catch (_) {
+      if (mounted) {
+        AppToast.show(context, 'Erro ao registrar interesse. Tente novamente.',
+            type: ToastType.error);
+      }
+    } finally {
+      if (mounted) setState(() => _loadingInteresse = false);
+    }
   }
 
   String? _toImageUrl(String? path) {
@@ -76,6 +104,14 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
           final ev = snap.data!;
           final capa = _toImageUrl(ev.image);
 
+          // Inicializa o estado de interesse com o valor vindo da API (uma única vez)
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!_interesseInitialized && !_loadingInteresse && ev.meuInteresse != null) {
+              _interesseInitialized = true;
+              setState(() => _meuInteresse = ev.meuInteresse!);
+            }
+          });
+
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
             children: [
@@ -85,7 +121,8 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
               const SizedBox(height: 40),
 
               if (ev.location != null) _InfoLine(icon: Icons.place_outlined, label: 'Local', value: ev.location!),
-              if (ev.startDate != null) 
+              if (ev.horario != null) _InfoLine(icon: Icons.schedule_outlined, label: 'Horário', value: ev.horario!),
+              if (ev.startDate != null)
                 _InfoLine(icon: Icons.event, label: 'Data', value: _formatDateRange(ev.startDate, ev.endDate)),
               const SizedBox(height: 40),
 
@@ -93,19 +130,96 @@ class _EventoDetailScreenState extends State<EventoDetailScreen> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(16),
                   child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: Image.network(
-                      capa, 
+                    aspectRatio: 87 / 109,
+                    child: CachedNetworkImage(
+                      imageUrl: capa,
                       fit: BoxFit.cover,
+                      placeholder: (_, __) => const ColoredBox(color: Color(0xFFEFEFEF)),
+                      errorWidget: (_, __, ___) => const ColoredBox(color: Color(0xFFEFEFEF)),
                     ),
                   ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 24),
               ],
 
-              if (ev.description != null)
-                Text(ev.description!,
-                  style: GoogleFonts.poppins(fontSize: 14, height: 1.45, color: kDarkGray)),
+              if (ev.description != null && ev.description!.isNotEmpty) ...[
+                Html(
+                  data: ev.description!,
+                  style: {
+                    'body': Style(
+                      fontFamily: 'Poppins',
+                      fontSize: FontSize(14),
+                      lineHeight: const LineHeight(1.55),
+                      color: kDarkGray,
+                      margin: Margins.zero,
+                      padding: HtmlPaddings.zero,
+                    ),
+                    'p': Style(margin: Margins.only(bottom: 8)),
+                    'h2': Style(
+                      fontFamily: 'Poppins',
+                      fontSize: FontSize(18),
+                      fontWeight: FontWeight.w700,
+                      color: kDarkGray,
+                      margin: Margins.only(top: 12, bottom: 6),
+                    ),
+                    'h3': Style(
+                      fontFamily: 'Poppins',
+                      fontSize: FontSize(16),
+                      fontWeight: FontWeight.w600,
+                      color: kDarkGray,
+                      margin: Margins.only(top: 10, bottom: 4),
+                    ),
+                    'ul': Style(margin: Margins.only(bottom: 8, left: 16)),
+                    'ol': Style(margin: Margins.only(bottom: 8, left: 16)),
+                    'li': Style(margin: Margins.only(bottom: 4)),
+                    'strong': Style(fontWeight: FontWeight.w700),
+                    'em': Style(fontStyle: FontStyle.italic),
+                    'u': Style(textDecoration: TextDecoration.underline),
+                  },
+                ),
+              ],
+
+              const SizedBox(height: 32),
+
+              _loadingInteresse
+                  ? const Center(child: CircularProgressIndicator(color: kBrandGreen))
+                  : _meuInteresse
+                      ? OutlinedButton.icon(
+                          onPressed: _toggleInteresse,
+                          icon: const Icon(Icons.notifications_active, color: kBrandGreen),
+                          label: Text('Interesse registrado',
+                              style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w600, color: kBrandGreen)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: kBrandGreen),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            minimumSize: const Size(double.infinity, 48),
+                          ),
+                        )
+                      : FilledButton(
+                          onPressed: _toggleInteresse,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: kBrandGreen,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            minimumSize: const Size(double.infinity, 48),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.notifications_none_outlined, color: Colors.white),
+                              const SizedBox(width: 8),
+                              Text('Tenho interesse',
+                                  style: GoogleFonts.poppins(
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white)),
+                            ],
+                          ),
+                        ),
             ],
           );
         },

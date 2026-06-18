@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/auth_service.dart';
+import '../../services/cep_service.dart';
 import '../../core/api/api_client.dart';
+import '../../core/formatters.dart';
 import '../../widgets/app_toast.dart';
 import 'change_password_screen.dart';
 
@@ -25,6 +27,13 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   final _phoneCtrl = TextEditingController();
   final _cidadeCtrl = TextEditingController();
 
+  // Endereço
+  final _cepCtrl         = TextEditingController();
+  final _ruaCtrl         = TextEditingController();
+  final _numeroCtrl      = TextEditingController();
+  final _complementoCtrl = TextEditingController();
+  final _bairroCtrl      = TextEditingController();
+
   bool _isLoading = true;
   bool _isSaving = false;
   Map<String, dynamic>? _userData;
@@ -45,6 +54,17 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       _emailCtrl.text = data?['email'] ?? '';
       _phoneCtrl.text = data?['telefone'] ?? data?['phone'] ?? '';
       _cidadeCtrl.text = data?['cidade'] ?? '';
+      // Endereço — formata CEP como XXXXX-XXX
+      final rawCep = (data?['cep'] ?? '').replaceAll(RegExp(r'\D'), '');
+      if (rawCep.length == 8) {
+        _cepCtrl.text = '${rawCep.substring(0, 5)}-${rawCep.substring(5)}';
+      } else {
+        _cepCtrl.text = rawCep;
+      }
+      _ruaCtrl.text         = data?['rua'] ?? '';
+      _numeroCtrl.text      = data?['numero'] ?? '';
+      _complementoCtrl.text = data?['complemento'] ?? '';
+      _bairroCtrl.text      = data?['bairro'] ?? '';
       _isLoading = false;
     });
   }
@@ -56,10 +76,15 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     try {
       final Map<String, dynamic> body = {};
 
-      final nome = _nameCtrl.text.trim();
-      final email = _emailCtrl.text.trim();
+      final nome     = _nameCtrl.text.trim();
+      final email    = _emailCtrl.text.trim();
       final telefone = _phoneCtrl.text.trim();
-      final cidade = _cidadeCtrl.text.trim();
+      final cidade   = _cidadeCtrl.text.trim();
+      final cep      = _cepCtrl.text.replaceAll(RegExp(r'\D'), '');
+      final rua      = _ruaCtrl.text.trim();
+      final numero   = _numeroCtrl.text.trim();
+      final complemento = _complementoCtrl.text.trim();
+      final bairro   = _bairroCtrl.text.trim();
 
       if (nome != (_userData?['nome'] ?? _userData?['name'] ?? '')) {
         body['nome'] = nome;
@@ -69,6 +94,13 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         body['telefone'] = telefone;
       }
       if (cidade != (_userData?['cidade'] ?? '')) body['cidade'] = cidade;
+
+      final originalCep = (_userData?['cep'] ?? '').replaceAll(RegExp(r'\D'), '');
+      if (cep != originalCep) body['cep'] = cep;
+      if (rua != (_userData?['rua'] ?? '')) body['rua'] = rua;
+      if (numero != (_userData?['numero'] ?? '')) body['numero'] = numero;
+      if (complemento != (_userData?['complemento'] ?? '')) body['complemento'] = complemento;
+      if (bairro != (_userData?['bairro'] ?? '')) body['bairro'] = bairro;
 
       if (body.isEmpty) {
         AppToast.show(context, 'Nenhuma alteração detectada.', type: ToastType.warning);
@@ -132,6 +164,178 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     return '${parts.first} ${parts.last}';
   }
 
+
+  // ── Sheet especial para CEP com auto-fill ──────────────────────────────────
+  void _editCep() {
+    final tempCep   = TextEditingController(text: _cepCtrl.text);
+    final tempRua   = TextEditingController(text: _ruaCtrl.text);
+    final tempBairro = TextEditingController(text: _bairroCtrl.text);
+    final tempCidade = TextEditingController(text: _cidadeCtrl.text);
+    bool sheetLoadingCep = false;
+    int  sheetCepSeq = 0;
+    final sheetFormKey = GlobalKey<FormState>();
+
+    showModalBottomSheet<Map<String, String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            Future<void> onCepChanged(String value) async {
+              final digits = value.replaceAll(RegExp(r'\D'), '');
+              if (digits.length != 8) return;
+              final seq = ++sheetCepSeq;
+              setSheetState(() => sheetLoadingCep = true);
+              final result = await CepService.fetch(digits);
+              if (seq != sheetCepSeq) return;
+              setSheetState(() => sheetLoadingCep = false);
+              if (result == null) return;
+              setSheetState(() {
+                tempRua.text    = result.logradouro;
+                tempBairro.text = result.bairro;
+                tempCidade.text = '${result.localidade} - ${result.uf}';
+              });
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(sheetCtx).viewInsets.bottom,
+              ),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 30),
+                child: Form(
+                  key: sheetFormKey,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Alterar CEP',
+                              style: GoogleFonts.poppins(
+                                color: _green,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, color: _lightGray),
+                              onPressed: () => Navigator.pop(sheetCtx),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: tempCep,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [CepFormatter()],
+                          autofocus: true,
+                          onChanged: onCepChanged,
+                          validator: (v) {
+                            final d = (v ?? '').replaceAll(RegExp(r'\D'), '');
+                            if (d.isEmpty) return 'Informe o CEP';
+                            if (d.length != 8) return 'CEP inválido';
+                            return null;
+                          },
+                          style: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: _dark,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: 'CEP',
+                            labelStyle: GoogleFonts.poppins(color: _lightGray, fontSize: 13),
+                            filled: true,
+                            fillColor: const Color(0xFFFFFFE9),
+                            suffixIcon: sheetLoadingCep
+                                ? const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: _green),
+                                    ),
+                                  )
+                                : null,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Color(0xFFBCC1A6)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Color(0xFFECECEC)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: _green, width: 1.5),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 16),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        FilledButton(
+                          onPressed: () {
+                            if (sheetFormKey.currentState?.validate() ?? false) {
+                              Navigator.pop(sheetCtx, {
+                                'cep':    tempCep.text,
+                                'rua':    tempRua.text,
+                                'bairro': tempBairro.text,
+                                'cidade': tempCidade.text,
+                              });
+                            }
+                          },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _green,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(
+                            'Confirmar',
+                            style: GoogleFonts.poppins(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).then((result) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        tempCep.dispose();
+        tempRua.dispose();
+        tempBairro.dispose();
+        tempCidade.dispose();
+      });
+      if (result != null && mounted) {
+        setState(() {
+          _cepCtrl.text    = result['cep'] ?? _cepCtrl.text;
+          _ruaCtrl.text    = result['rua'] ?? _ruaCtrl.text;
+          _bairroCtrl.text = result['bairro'] ?? _bairroCtrl.text;
+          _cidadeCtrl.text = result['cidade'] ?? _cidadeCtrl.text;
+        });
+      }
+    });
+  }
 
   void _editField({
     required String title,
@@ -264,6 +468,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     _cidadeCtrl.dispose();
+    _cepCtrl.dispose();
+    _ruaCtrl.dispose();
+    _numeroCtrl.dispose();
+    _complementoCtrl.dispose();
+    _bairroCtrl.dispose();
     super.dispose();
   }
 
@@ -360,6 +569,64 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       textCapitalization: TextCapitalization.words,
                       validator: (v) => (v == null || v.trim().isEmpty)
                           ? 'Informe sua cidade'
+                          : null,
+                    ),
+                  ),
+                  const _DividerRow(),
+                  _ProfileEditRow(
+                    label: 'Alterar CEP',
+                    value: _cepCtrl.text.isNotEmpty ? _cepCtrl.text : 'Não informado',
+                    onTap: _editCep,
+                  ),
+                  const _DividerRow(),
+                  _ProfileEditRow(
+                    label: 'Alterar rua',
+                    value: _ruaCtrl.text.isNotEmpty ? _ruaCtrl.text : 'Não informado',
+                    onTap: () => _editField(
+                      title: 'Alterar rua',
+                      label: 'Rua / Logradouro',
+                      controller: _ruaCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Informe a rua'
+                          : null,
+                    ),
+                  ),
+                  const _DividerRow(),
+                  _ProfileEditRow(
+                    label: 'Alterar número',
+                    value: _numeroCtrl.text.isNotEmpty ? _numeroCtrl.text : 'Não informado',
+                    onTap: () => _editField(
+                      title: 'Alterar número',
+                      label: 'Número',
+                      controller: _numeroCtrl,
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const _DividerRow(),
+                  _ProfileEditRow(
+                    label: 'Alterar complemento',
+                    value: _complementoCtrl.text.isNotEmpty
+                        ? _complementoCtrl.text
+                        : 'Opcional',
+                    onTap: () => _editField(
+                      title: 'Alterar complemento',
+                      label: 'Complemento',
+                      controller: _complementoCtrl,
+                      textCapitalization: TextCapitalization.words,
+                    ),
+                  ),
+                  const _DividerRow(),
+                  _ProfileEditRow(
+                    label: 'Alterar bairro',
+                    value: _bairroCtrl.text.isNotEmpty ? _bairroCtrl.text : 'Não informado',
+                    onTap: () => _editField(
+                      title: 'Alterar bairro',
+                      label: 'Bairro',
+                      controller: _bairroCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Informe o bairro'
                           : null,
                     ),
                   ),

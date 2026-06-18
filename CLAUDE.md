@@ -17,8 +17,10 @@ lib/
     api/            — ApiClient, ApiConfig
     formatters.dart — CpfFormatter, PhoneFormatter, CepFormatter (compartilhados)
   data/
-    models/         — Park, Review, Space, Reservation, Participant, AppEvent, AppNotification
-    repositories/   — go_park_repository, go_reviews_repository, go_reservation_repository, etc.
+    models/         — Park, Review, Space, Reservation, Participant, AppEvent, AppNotification,
+                      ParkActivityType, ParkEventRule, EventRequest
+    repositories/   — go_park_repository, go_reviews_repository, go_reservation_repository,
+                      go_event_repository
   providers/
     notification_provider.dart — ChangeNotifier para inbox de notificações (SharedPreferences)
   screens/
@@ -26,7 +28,9 @@ lib/
                       verificar_codigo_screen, nova_senha_screen
     reservations/   — park_selection, spaces_catalog, space_detail, booking_calendar,
                       reservation_form, my_reservations
-    notifications_screen.dart — inbox de notificações FCM
+    events/         — event_park_selection, event_request_screen, event_details_screen,
+                      event_request_success_screen, my_event_requests_screen
+    notifications_screen.dart — inbox de notificações FCM (redesenhado 2026-06-12)
     denuncie_screen.dart      — formulário de denúncia com CEP API + fotos
   services/
     auth_service.dart         — JWT em FlutterSecureStorage, loginWithToken()
@@ -65,8 +69,10 @@ docs/
 
 ## Estado atual do sistema de reservas (implementado)
 - Fluxo: Home → seleção de parque → espaços → calendário (semana atual) → formulário → "Minhas reservas"
-- Regras: 1 reserva ativa por CPF, duração fixa 2h, aprovação pelo gestor
-- Rejeição: gestor informa motivo (obrigatório) → usuário tem 2h para editar e reenviar
+- Regras: 1 reserva ativa por CPF, duração **1h ou 2h** (usuário escolhe slots consecutivos), aprovação pelo gestor
+- Duração: `booking_calendar_screen.dart` usa `_anchorHour`+`_selCount`; slots em incrementos de 1h; máx 2 consecutivos
+- Backend valida `duracao_horas` (1 ou 2) — `ErrInvalidDuration` retorna 400 se fora desse range; `addHours(start, n)` calcula fim
+- Rejeição: gestor informa motivo (obrigatório) → usuário tem deeplink para editar e reenviar; guard impede reenvio se status ≠ `Rejeitada`
 - Cancelamento: usuário pode cancelar Pendente/Aprovada antes do dia da reserva
 - Push FCM: graceful degradation (funciona sem config Firebase; ativa ao plugar credenciais)
 - `Space` é a única entidade para lugares físicos (unificou map_points + spaces)
@@ -112,12 +118,53 @@ docs/
 - Para verificar token no banco: `SELECT user_id, platform, updated_at FROM fcm_tokens ORDER BY updated_at DESC LIMIT 5;`
 - Para verificar FCM no backend: `journalctl -u backend-park -n 100 | grep FCM`
 
+## Sistema de eventos (implementado 2026-06-12)
+- Fluxo Flutter: Home → EventParkSelectionScreen → EventRequestScreen (espaço + data + hora) → EventDetailsScreen (formulário) → EventRequestSuccessScreen
+- `EventDetailsScreen`: tipo atividade (chips ou free-text), qtd pessoas, objetivo, nome/telefone/CPF/email do responsável (pré-preenchidos do cadastro), switch BPA
+- Regras dinâmicas: `ParkEventRule` filtra por `tipoAtividade` e `thresholdMin` em tempo real; BPA forçado se `bpaObrigatorio=true`
+- `EventRequestSuccessScreen`: tela de sucesso com `assets/images/calendario.png` (mesmo padrão da reserva)
+- `my_event_requests_screen.dart`: lista solicitações do usuário
+- Rota de sucesso: `/tabs/home/eventos/sucesso`
+
+## Sistema de regras de evento por parque (implementado 2026-06-12)
+- Entidade `ParkEventRule`: `titulo`, `texto`, `tipo_atividade`, `threshold_min`, `threshold_max`, `bpa_obrigatorio`, `min_participantes`, `obrigatoria`, `ativo`, `ordem`
+- Backend seed: 7 regras padrão por parque na inicialização (antecedência 15 dias, limpeza, ambulância 200+, segurança 500+, corridas, trilhas, horário)
+- Admin: `EventRulesManagement` em `/parques/:parkId/regras-eventos` — toggle ativo/inativo, criar/editar/deletar
+- Endpoint público: `GET /event-requests/rules?park_id=X` → só retorna `ativo=true`
+- Endpoint admin: `GET /admin/parks/:id/event-rules` → retorna todas
+
+## Sistema de tipos de atividade por parque (implementado 2026-06-12)
+- Entidade `ParkActivityType`: `nome`, `descricao`, `ativo`, `park_id`
+- Backend seed: 7 tipos padrão por parque na inicialização
+- Flutter: carregados em `EventDetailsScreen`; fallback para campo de texto livre se nenhum disponível
+
+## Campo `permite_evento` nos espaços (implementado 2026-06-12)
+- `Space.PermiteEvento bool` — controla se o espaço aceita solicitações de evento
+- `MapPointInput` e `MapPointResponse` incluem `permite_evento`
+- Admin: toggle "Permite solicitar eventos" no formulário de Pontos de Interesse
+- Sem este toggle ativo no espaço, o backend retorna erro "este espaço não permite eventos"
+
+## Sistema de avaliações — status e moderação (implementado 2026-06-17)
+- **3 status apenas**: `Pendente`, `Publicada`, `Rejeitada` (eliminados: Aprovada, Ocultada, Denunciada)
+- **Shadow moderation**: usuário sempre vê a própria avaliação sem nenhum badge de status; acredita que está pública
+- Backend: `ListByParkID` filtra `WHERE status = 'Publicada'`; `Update` handler aceita SOMENTE `Publicada` ou `Rejeitada` (400 para qualquer outro)
+- Flutter: `Review.status` default `'Pendente'`; `_hasActiveReview` verifica `status == 'Publicada'`; badge "Não publicada" removido; avaliação rejeitada ainda aparece para o autor (shadow)
+- Admin React: 4 cards de métrica (Total, Média, Pendentes, Parques); botões diretos "Publicar"/"Rejeitar" sem dropdown
+- Migration SQL no boot: `Aprovada→Publicada`, `Ocultada→Rejeitada`, `Denunciada→Publicada`, vazio→`Pendente`
+- Spec: `docs/superpowers/specs/2026-06-16-review-status-redesign.md`
+
+## Painel Admin — mudanças (2026-06-12)
+- `MapPointFormPage.tsx`: removidos campos Latitude, Longitude, "Seção no app", toggle "Exibir no mapa"
+- Toggles desativados: cor alterada de `bg-border-strong` (invisível) → `bg-gray-300`
+- `EventRequestsManagement.tsx`: bug `formatarData` corrigido (RangeError: Invalid time value) — `data_evento` vinha como ISO completo do Go backend
+
 ## Pendências que dependem de ação humana
 1. **TestFlight push notifications**: adicionar capability "Push Notifications" no Xcode → Archive → nova build TestFlight → instalar → logar → aceitar permissão
 2. **Resend**: criar conta em resend.com, verificar domínio, adicionar `RESEND_API_KEY` e `EMAIL_FROM` no `.env` do backend
 3. **PAINEL-PARK**: não está no git — arquivos salvos localmente mas sem versionamento
-4. **Deploy**: rodar `deploy.sh` no PARQUE-BACK para subir novas features ao servidor
-5. **Email Brevo**: migrado para SMTP — variáveis necessárias: `BREVO_SMTP_LOGIN`, `BREVO_SMTP_PASSWORD`, `EMAIL_FROM`
+4. **Deploy pendente (2026-06-17)**: rodar `deploy.sh` no PARQUE-BACK para subir feature reserva 1h/2h + redesign status avaliações ao servidor
+5. **Commits Flutter pendentes (2026-06-17)**: branch `feat/reservations-redesign` — tudo implementado mas não commitado (code-review fixes + reserva 1h/2h + redesign avaliações + fix share button + map picker logos reais)
+6. **Email Brevo**: migrado para SMTP — variáveis necessárias: `BREVO_SMTP_LOGIN`, `BREVO_SMTP_PASSWORD`, `EMAIL_FROM`
 
 ## Componentes globais importantes
 - `AppToast` (`lib/widgets/app_toast.dart`) — toast estilo Duolingo, usar em vez de SnackBar
@@ -240,6 +287,72 @@ Email Brevo: usa SMTP em vez de REST API (`smtp-relay.brevo.com:587`).
 - Backend: Reservation expandida, ReservationUseCase, FCM graceful degradation
 - Flutter: fluxo completo Home → reserva → aprovação → Minhas reservas
 - Admin React: ReservationsManagement com Aprovar/Rejeitar/Cancelar
+
+### 2026-06-12 (feat: sistema de eventos completo — Flutter + Backend + Admin)
+
+**Flutter:**
+- Fluxo redesenhado: 5 telas → 2 telas (`EventRequestScreen` + `EventDetailsScreen`)
+- `EventRequestScreen`: seleção de espaço (chips filtrados por `permiteEvento`) + calendário inline + chips de horário
+- `EventDetailsScreen`: formulário completo com pré-preenchimento de nome/telefone/CPF/email do usuário logado
+- `EventRequestSuccessScreen`: tela de sucesso pós-envio (mesmo padrão da reserva com `calendario.png`)
+- `NotificationsScreen` redesenhada: ícones melhores por tipo (`event_available_rounded`, `celebration_rounded`, `local_activity_rounded`, etc.) com container centralizado
+- Rota `/tabs/home/eventos/sucesso` adicionada ao `app_router.dart`
+
+**Backend (PARQUE-BACK) — deploy feito:**
+- `EventRequest`: colunas `cpf_responsavel` e `email_responsavel` adicionadas (GORM AutoMigrate)
+- `Space.PermiteEvento`: mapeado em `MapPointInput`, `MapPointResponse`, `toSpace()`, `toResponse()`
+- `ParkEventRule`: campos `titulo`, `bpa_obrigatorio`, `min_participantes`, `ativo` adicionados
+- Seed 7 tipos de atividade padrão + 7 regras padrão por parque no boot
+- Endpoint público `ListActive` retorna só regras `ativo=true`
+
+**Admin Panel (PAINEL-PARK):**
+- `MapPointFormPage`: removidos Latitude, Longitude, "Seção no app", toggle "Exibir no mapa"
+- Toggle "Permite solicitar eventos" adicionado (roxo, `permite_evento`)
+- Toggles off agora visíveis: `bg-gray-300` em vez de `bg-border-strong`
+- `EventRequestsManagement`: bug `formatarData` corrigido (ISO datetime completo do Go)
+- `EventRulesManagement`: nova página `/parques/:parkId/regras-eventos`
+
+### 2026-06-17 (feat: reserva 1h/2h + redesign avaliações + 10 correções code-review)
+
+**Reserva 1h ou 2h (Flutter + Backend):**
+- `booking_calendar_screen.dart`: substituído `_selectedSlotValue` por `_anchorHour`+`_selCount`; slots em incrementos de 1h; seleção consecutiva (adjacente estende, não-adjacente recomeça, tocar 2º retorna a 1h); resumo "13:00 – 15:00 · 2h"
+- Backend (`reservation_usecase.go`): `addHours(start, n)` substitui `addTwoHours`; valida `DuracaoHoras` (1 ou 2) → `ErrInvalidDuration` → HTTP 400; `disponibilidade` gera slots de 1h (`hour++`)
+- `go_reservation_repository.dart`: parâmetro `int duracaoHoras = 1`, body inclui `'duracao_horas'`
+- `reservation_form_screen.dart`: campo `_duracaoHoras`, resumo com duração, guard deeplink (só reenvio se `status == 'Rejeitada'`)
+
+**Redesign de status de avaliações (3 projetos):**
+- 6 status → 3: `Pendente`, `Publicada`, `Rejeitada` — shadow moderation (usuário nunca vê badge, sempre acredita que está publicada)
+- Backend: `ListByParkID` filtra só `Publicada`; `Update` vinculado a `Publicada`/`Rejeitada`; migration SQL no boot
+- Flutter: default `'Pendente'`, badge "Não publicada" removido, avaliação rejeitada ainda aparece para autor
+- Admin React: 3 status, 4 métricas, botões "Publicar"/"Rejeitar" diretos
+
+**10 correções do code-review:**
+1. `evento_detail_screen.dart`: flag `_interesseInitialized` — toggle não reverte mais em rebuild do FutureBuilder
+2. `event_details_screen.dart`: modo edição chama `_prefillUser()` antes de `_prefillEditing()` — CPF/email vêm de `AuthService.currentUser`
+3. `run_tracker_service.dart`: filtro GPS 30m + sync cold start com `unawaited(syncPending())` + guard `_syncing` sem reentrada
+4. `run_tracker_service.dart`: `synced` removido como campo; virou getter derivado `bool get synced => serverId != null`
+5. `go_run_activity_repository.dart`: removido `synced: true` do construtor (campo não existe mais)
+6. `atividade_screen.dart`: `_handleSave` null-safe + try/catch; não crasha em resultado inesperado
+7. `park_detail_screen.dart`: `_resolveImg` duplicado removido (parâmetro `toImageUrl` único); `_SmartImage` deletado (eliminado download duplo); `_SpaceCard` usa `CachedNetworkImage` diretamente
+8–10. Telas mortas de eventos deletadas: `event_datetime_screen.dart`, `event_form_screen.dart`, `event_space_selection_screen.dart`
+
+**Estado pós-sessão:** tudo implementado, `flutter analyze` 0 erros, `go build` ✅ — **nada commitado nem deployado ainda**
+
+### 2026-06-17 (fix: share button iOS + map picker redesign)
+
+**Botão Compartilhar (`atividade_screen.dart`):**
+- `sharePositionOrigin` é obrigatório no iOS — `UIActivityViewController` lança `PlatformException("sharePositionOrigin: argument must be set")` se o rect for zero (default quando omitido)
+- Fix: `GlobalKey _shareButtonKey` no `OutlinedButton.icon` de compartilhar + `box.localToGlobal(Offset.zero) & box.size` passado como `sharePositionOrigin`; fallback seguro `Rect.fromLTWH(0, 0, 1, 1)`
+- Removido parâmetro `text` de `Share.shareXFiles` — iOS rejeita `UIActivityViewController` com `String + XFile` simultâneos (WhatsApp/Instagram recusam o item combinado)
+- `_handleShare` com try/catch completo + `bytes.isEmpty` check + `debugPrint` do erro real no catch
+
+**Map Picker redesenhado (`map_screen.dart`):**
+- Logos reais: `assets/images/maps/waze.png` (PNG 1600×1600) + `assets/images/maps/google_maps.svg` (SVG oficial via `flutter_svg`)
+- 2 cards horizontais lado a lado; `InkWell` com ripple; logo 56px centralizado + nome abaixo
+- Zero loading state — `_checkApps()`/`_checking`/`_available` removidos
+- Apple Maps removido de todas as plataformas; Google Maps URL corrigida para iOS: `comgooglemaps://`
+- `_NavApp` usa `assetPath + isSvg` em vez de `iconData + iconColor + iosOnly`
+- `LSApplicationQueriesSchemes` adicionado ao `ios/Runner/Info.plist` (`comgooglemaps`, `waze`)
 
 ### 2026-06-01
 - Spec: Review Draft Mode (`docs/superpowers/specs/2026-06-01-review-draft-mode-design.md`)

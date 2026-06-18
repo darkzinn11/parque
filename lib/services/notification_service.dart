@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/api/api_client.dart';
 import '../data/models/app_notification.dart';
+import '../firebase_options.dart';
 import '../providers/notification_provider.dart';
 import '../services/auth_service.dart';
 
@@ -40,19 +41,40 @@ class NotificationService {
   /// Registrado pelo main.dart após o MultiProvider estar montado.
   NotificationProvider? notificationProvider;
 
+  /// Remove o token deste dispositivo do backend (chamado no logout).
+  Future<void> deleteTokenOnLogout() async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null) return;
+      await _api.delete('me/fcm-token', body: {'token': token});
+      if (kDebugMode) print('🗑️ FCM token removido do backend');
+    } catch (e) {
+      if (kDebugMode) print('⚠️ Falha ao remover token FCM no logout: $e');
+    }
+  }
+
   /// Força o reenvio do token FCM ao backend.
   Future<void> saveTokenAfterLogin() async {
     try {
       final token = await FirebaseMessaging.instance.getToken();
-      if (token != null) await _saveToken(token);
-    } catch (_) {}
+      if (kDebugMode) print('🔑 FCM token (pós-login): $token');
+      if (token != null) {
+        await _saveToken(token);
+      } else {
+        if (kDebugMode) print('⚠️ FCM token nulo — permissão de notificação provavelmente negada no iOS');
+      }
+    } catch (e) {
+      if (kDebugMode) print('⚠️ FCM getToken falhou: $e');
+    }
   }
 
   /// Inicializa o Firebase + FCM de forma segura.
   Future<void> initialize() async {
     if (_initialized) return;
     try {
-      await Firebase.initializeApp();
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
 
       final messaging = FirebaseMessaging.instance;
 
@@ -75,6 +97,7 @@ class NotificationService {
 
       // Registra o token e escuta refreshes.
       final token = await messaging.getToken();
+      if (kDebugMode) print('🔑 FCM token: $token');
       if (token != null) await _saveToken(token);
       messaging.onTokenRefresh.listen(_saveToken);
 

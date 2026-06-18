@@ -100,7 +100,14 @@ class AuthService extends ChangeNotifier {
   // ======================================================
   // LOGOUT
   // ======================================================
+
+  /// Registrado pelo main.dart para evitar dependência circular com NotificationService.
+  Future<void> Function()? onBeforeLogout;
+
   Future<void> logout() async {
+    try {
+      await onBeforeLogout?.call();
+    } catch (_) {}
     _tokenCache = null;
     _userCache = null;
     await _storage.delete(key: _tokenKey);
@@ -132,15 +139,25 @@ class AuthService extends ChangeNotifier {
     String? phone,
     String? cpf,
     String? cidade,
+    String? cep,
+    String? rua,
+    String? numero,
+    String? complemento,
+    String? bairro,
   }) async {
     try {
       final res = await _api.post('/register', body: {
         'nome': username,
         'email': email,
         'senha': password,
-        if (phone != null) 'telefone': phone,
-        if (cpf != null) 'cpf': cpf,
-        if (cidade != null) 'cidade': cidade,
+        if (phone != null && phone.isNotEmpty) 'telefone': phone,
+        if (cpf != null && cpf.isNotEmpty) 'cpf': cpf,
+        if (cidade != null && cidade.isNotEmpty) 'cidade': cidade,
+        if (cep != null && cep.isNotEmpty) 'cep': cep,
+        if (rua != null && rua.isNotEmpty) 'rua': rua,
+        if (numero != null && numero.isNotEmpty) 'numero': numero,
+        if (complemento != null && complemento.isNotEmpty) 'complemento': complemento,
+        if (bairro != null && bairro.isNotEmpty) 'bairro': bairro,
       });
 
       if (res.statusCode != 200 && res.statusCode != 201) {

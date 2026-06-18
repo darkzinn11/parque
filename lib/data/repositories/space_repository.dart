@@ -7,7 +7,9 @@ class SpaceRepository {
   final ApiClient _api = ApiClient();
 
   /// Fetches a list of spaces filtered by category and/or park ID.
-  Future<List<Space>> fetchSpaces({String? category, int? parkId}) async {
+  /// Pass [permiteReserva] = true to show only reservable spaces (reservations catalog).
+  /// Pass [permiteReserva] = null (default) for no filter (admin / event flow).
+  Future<List<Space>> fetchSpaces({String? category, int? parkId, bool? permiteReserva}) async {
     try {
       final query = <String, dynamic>{};
       if (category != null && category.isNotEmpty) {
@@ -15,6 +17,9 @@ class SpaceRepository {
       }
       if (parkId != null && parkId > 0) {
         query['park_id'] = parkId.toString();
+      }
+      if (permiteReserva != null) {
+        query['permite_reserva'] = permiteReserva ? 'true' : 'false';
       }
 
       final res = await _api.get('spaces', query: query);

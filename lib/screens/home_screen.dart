@@ -15,7 +15,9 @@ import '../widgets/favorite_button.dart';
 
 import '../data/park_repository.dart';
 import '../data/repositories/map_point_repository.dart';
+import '../data/repositories/go_reservation_repository.dart';
 import '../data/models/park.dart';
+import '../data/models/reservation.dart';
 import '../core/api/api_config.dart';
 import '../providers/notification_provider.dart';
 
@@ -36,15 +38,15 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final TextEditingController _search = TextEditingController();
 
   bool _isLoading = true;
   String? _error;
 
-  List<_CardItem> explorar = []; // parques
-  List<_CardItem> divertir = []; // atividades/eventos
-  List<_CardItem> caminhar = []; // vem caminhar (se disponível no Go)
+  List<_CardItem> explorar = [];
+  List<_CardItem> divertir = [];
+  List<_CardItem> caminhar = [];
 
   String _query = '';
 
@@ -53,10 +55,47 @@ class _HomeScreenState extends State<HomeScreen> {
   Park? _closestPark;
   double? _closestDistanceKm;
 
+  Reservation? _nextReservation;
+
+  GoRouter? _router;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadAll();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final router = GoRouter.of(context);
+    if (_router != router) {
+      _router?.routerDelegate.removeListener(_onRouteChange);
+      _router = router;
+      _router!.routerDelegate.addListener(_onRouteChange);
+    }
+  }
+
+  void _onRouteChange() {
+    final location = _router?.routerDelegate.currentConfiguration.uri.toString() ?? '';
+    if (location == '/tabs/home' || location == '/tabs/home/') {
+      _loadNextReservation();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadNextReservation();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _router?.routerDelegate.removeListener(_onRouteChange);
+    super.dispose();
   }
 
 
@@ -113,9 +152,11 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         explorar = parks;
         divertir = activities;
-        caminhar = walks; 
+        caminhar = walks;
         _isLoading = false;
       });
+
+      _loadNextReservation();
 
       _determinePosition();
     } catch (e) {
@@ -125,6 +166,30 @@ class _HomeScreenState extends State<HomeScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _loadNextReservation() async {
+    if (!mounted) return;
+    final isLogged = context.read<AuthService>().currentUser != null;
+    if (!isLogged) {
+      if (_nextReservation != null) setState(() => _nextReservation = null);
+      return;
+    }
+    try {
+      final reservations = await GoReservationRepository().fetchMine();
+      if (!mounted) return;
+      final today = DateTime.now();
+      final todayDate = DateTime(today.year, today.month, today.day);
+      final upcoming = reservations.where((r) {
+        if (r.status != 'Aprovada') return false;
+        final parts = r.data.split('-');
+        if (parts.length != 3) return false;
+        final d = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+        return !d.isBefore(todayDate);
+      }).toList()
+        ..sort((a, b) => a.data.compareTo(b.data));
+      setState(() => _nextReservation = upcoming.isNotEmpty ? upcoming.first : null);
+    } catch (_) {}
   }
 
   String? _toImageUrl(dynamic value) {
@@ -200,6 +265,8 @@ class _HomeScreenState extends State<HomeScreen> {
         displayName = nome.toString().split(' ').first;
       }
     }
+
+    final filteredExplorar = _applyFilter(explorar);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -358,6 +425,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
 
+                              // CARD PRÓXIMA RESERVA
+                              if (_nextReservation != null) ...[
+                                const SizedBox(height: 16),
+                                _NextReservationCard(
+                                  reservation: _nextReservation!,
+                                  onTap: () => context.push(AppRoutes.userReservations),
+                                ),
+                              ],
+
                               const SizedBox(height: 32),
 
                               // PERTO DE VOCÊ
@@ -452,7 +528,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   height: exploreCardHeight,
                                   radius: exploreCardRadius,
                                 )
-                              : _applyFilter(explorar).isEmpty
+                              : filteredExplorar.isEmpty
                                   ? const _EmptyLane()
                                   : ListView.separated(
                                       scrollDirection: Axis.horizontal,
@@ -460,7 +536,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           horizontal: 20),
                                       itemBuilder: (context, i) {
                                         final item =
-                                            _applyFilter(explorar)[i];
+                                            filteredExplorar[i];
                                         return _ExploreCard(
                                           item: item,
                                           color: kBrandGreen,
@@ -488,7 +564,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       separatorBuilder: (_, __) =>
                                           const SizedBox(width: 16),
                                       itemCount:
-                                          _applyFilter(explorar).length,
+                                          filteredExplorar.length,
                                     ),
                         ),
 
@@ -1250,3 +1326,103 @@ class _ShimmerCardList extends StatelessWidget {
     );
   }
 }
+
+class _NextReservationCard extends StatelessWidget {
+  const _NextReservationCard({required this.reservation, required this.onTap});
+
+  final Reservation reservation;
+  final VoidCallback onTap;
+
+  bool get _isToday {
+    final today = DateTime.now();
+    final parts = reservation.data.split('-');
+    if (parts.length != 3) return false;
+    final d = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+    return d.year == today.year && d.month == today.month && d.day == today.day;
+  }
+
+  String get _dateLabel {
+    if (_isToday) return 'Hoje';
+    final parts = reservation.data.split('-');
+    if (parts.length != 3) return reservation.data;
+    final d = DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+    const weekdays = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+    final wd = weekdays[d.weekday - 1];
+    return '$wd, ${parts[2]}/${parts[1]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isToday = _isToday;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9FAE8),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: kBrandGreen,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.calendar_month_rounded,
+                  color: Colors.white, size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: kBrandGreen.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      isToday ? 'Hoje!' : 'Reserva confirmada',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: kBrandGreen,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    reservation.spaceName,
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: kBrandGreen,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$_dateLabel  •  ${reservation.horaInicio} às ${reservation.horaFim}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: kDarkGray.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.arrow_forward_ios_rounded,
+                size: 14, color: kBrandGreen),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

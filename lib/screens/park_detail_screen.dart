@@ -401,6 +401,7 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
                                       itemBuilder: (_, index) => _ReviewCard(
                                         review: _reviews[index],
                                         parkHeroUrl: heroUrl,
+                                        toImageUrl: _toImageUrl,
                                       ),
                                     ),
                                   ),
@@ -657,20 +658,15 @@ class _ErrorView extends StatelessWidget {
 // ── Card de review ──────────────────────────────────────────────────────────
 
 class _ReviewCard extends StatelessWidget {
-  const _ReviewCard({required this.review, this.parkHeroUrl});
+  const _ReviewCard({required this.review, this.parkHeroUrl, required this.toImageUrl});
 
   final Review review;
   final String? parkHeroUrl;
-
-  String? _resolveImg(String? raw) {
-    if (raw == null || raw.isEmpty) return null;
-    if (raw.startsWith('http')) return raw;
-    return 'https://apps.sitw.com.br/backend-park$raw';
-  }
+  final String? Function(String?) toImageUrl;
 
   @override
   Widget build(BuildContext context) {
-    final imgUrl = _resolveImg(review.midiaUrl) ?? parkHeroUrl;
+    final imgUrl = toImageUrl(review.midiaUrl) ?? parkHeroUrl;
     final hasText = review.text != null && review.text!.isNotEmpty;
     final hasTitle = review.title != null && review.title!.isNotEmpty;
 
@@ -829,7 +825,7 @@ class _ReviewCard extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _ReviewDetailSheet(review: review, parkHeroUrl: parkHeroUrl),
+      builder: (_) => _ReviewDetailSheet(review: review, parkHeroUrl: parkHeroUrl, toImageUrl: toImageUrl),
     );
   }
 }
@@ -837,15 +833,10 @@ class _ReviewCard extends StatelessWidget {
 // ── Modal de detalhe da review ───────────────────────────────────────────────
 
 class _ReviewDetailSheet extends StatelessWidget {
-  const _ReviewDetailSheet({required this.review, this.parkHeroUrl});
+  const _ReviewDetailSheet({required this.review, this.parkHeroUrl, required this.toImageUrl});
   final Review review;
   final String? parkHeroUrl;
-
-  String? _resolveImg(String? raw) {
-    if (raw == null || raw.isEmpty) return null;
-    if (raw.startsWith('http')) return raw;
-    return 'https://apps.sitw.com.br/backend-park$raw';
-  }
+  final String? Function(String?) toImageUrl;
 
   String _shortName(String full) {
     final parts = full.trim().split(RegExp(r'\s+'));
@@ -855,7 +846,7 @@ class _ReviewDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imgUrl = _resolveImg(review.midiaUrl) ?? parkHeroUrl;
+    final imgUrl = toImageUrl(review.midiaUrl) ?? parkHeroUrl;
     final hasText = review.text != null && review.text!.isNotEmpty;
     final hasTitle = review.title != null && review.title!.isNotEmpty;
     final dateStr = review.createdAt != null
@@ -1005,7 +996,17 @@ class _SpaceCard extends StatelessWidget {
                 height: 200,
                 width: double.infinity,
                 child: imgUrl != null
-                    ? _SmartImage(url: imgUrl)
+                    ? CachedNetworkImage(
+                        imageUrl: imgUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => const ColoredBox(color: Color(0xFFE5EFE2)),
+                        errorWidget: (_, __, ___) => Container(
+                          color: const Color(0xFFE5EFE2),
+                          child: const Center(
+                            child: Icon(Icons.park_outlined, color: kBrandGreen, size: 40),
+                          ),
+                        ),
+                      )
                     : Container(
                         color: const Color(0xFFE5EFE2),
                         child: const Center(
@@ -1027,56 +1028,6 @@ class _SpaceCard extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-// Detecta se a imagem é retrato e aplica BoxFit adequado
-class _SmartImage extends StatefulWidget {
-  const _SmartImage({required this.url});
-  final String url;
-
-  @override
-  State<_SmartImage> createState() => _SmartImageState();
-}
-
-class _SmartImageState extends State<_SmartImage> {
-  bool? _isPortrait;
-
-  @override
-  void initState() {
-    super.initState();
-    _probeAspectRatio();
-  }
-
-  void _probeAspectRatio() {
-    final stream = NetworkImage(widget.url).resolve(ImageConfiguration.empty);
-    stream.addListener(ImageStreamListener(
-      (info, _) {
-        if (mounted) {
-          setState(() => _isPortrait = info.image.height > info.image.width);
-        }
-      },
-      onError: (_, __) {},
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final portrait = _isPortrait ?? false;
-    return Container(
-      color: portrait ? kBrandGreen.withValues(alpha: 0.12) : const Color(0xFFE5EFE2),
-      child: CachedNetworkImage(
-        imageUrl: widget.url,
-        fit: portrait ? BoxFit.contain : BoxFit.cover,
-        placeholder: (_, __) => const SizedBox.shrink(),
-        errorWidget: (_, __, ___) => Container(
-          color: const Color(0xFFE5EFE2),
-          child: const Center(
-            child: Icon(Icons.park_outlined, color: kBrandGreen, size: 40),
-          ),
         ),
       ),
     );
