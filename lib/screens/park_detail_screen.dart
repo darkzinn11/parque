@@ -1326,7 +1326,7 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFFE5EFE2)),
+                  borderSide: const BorderSide(color: kBrandGreen),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1357,7 +1357,7 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
                 contentPadding: const EdgeInsets.all(16),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFFE5EFE2)),
+                  borderSide: const BorderSide(color: kBrandGreen),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1386,7 +1386,7 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFFAFBF6),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFD0D5DD), width: 1.5),
+                    border: Border.all(color: kBrandGreen, width: 1.5),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
