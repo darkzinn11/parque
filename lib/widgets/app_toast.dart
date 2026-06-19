@@ -187,6 +187,7 @@ class _ToastCard extends StatelessWidget {
                 fontWeight: FontWeight.w600,
                 color: cfg.textColor,
                 height: 1.35,
+                decoration: TextDecoration.none,
               ),
             ),
           ),

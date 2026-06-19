@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../data/models/reservation.dart';
 import '../../data/repositories/go_reservation_repository.dart';
+import '../../services/auth_service.dart';
 import '../../widgets/app_toast.dart';
 
 const _green = Color(0xFF669340);
@@ -191,12 +192,21 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
     });
   }
 
+  String _stripCpf(String cpf) => cpf.replaceAll(RegExp(r'[^\d]'), '');
+
   List<Participant>? _collectParticipants() {
     if (_participants.isEmpty) {
       AppToast.show(context, 'Adicione ao menos um participante com nome e CPF.', type: ToastType.error);
       return null;
     }
+
+    final leaderCpf = _stripCpf(
+      AuthService.instance.currentUser?['cpf']?.toString() ?? '',
+    );
+
     final result = <Participant>[];
+    final seen = <String>{};
+
     for (final c in _participants) {
       final nome = c.nome.text.trim();
       final cpf = c.cpf.text.trim();
@@ -204,6 +214,16 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
         AppToast.show(context, 'Preencha nome e CPF de todos os participantes.', type: ToastType.error);
         return null;
       }
+      final cpfDigits = _stripCpf(cpf);
+      if (leaderCpf.isNotEmpty && cpfDigits == leaderCpf) {
+        AppToast.show(context, 'O responsável não pode ser listado como participante.', type: ToastType.error);
+        return null;
+      }
+      if (seen.contains(cpfDigits)) {
+        AppToast.show(context, 'CPF duplicado na lista de participantes.', type: ToastType.error);
+        return null;
+      }
+      seen.add(cpfDigits);
       result.add(Participant(nome: nome, cpf: cpf));
     }
     return result;

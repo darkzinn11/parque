@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -682,7 +682,7 @@ class _ActivityDetailModalState extends State<ActivityDetailModal> {
     }
     bool ok = false;
     try {
-      final result = await ImageGallerySaver.saveImage(
+      final result = await ImageGallerySaverPlus.saveImage(
         bytes,
         quality: 95,
         name: 'atividade_parque_${DateTime.now().millisecondsSinceEpoch}',
@@ -866,16 +866,20 @@ class _HeroSection extends StatelessWidget {
                                 color: selected ? _green : _lightText,
                               ),
                               const SizedBox(width: 5),
-                              Text(
+                              Flexible(
+                              child: Text(
                                 typeLabels[i],
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: selected
                                       ? FontWeight.w700
                                       : FontWeight.w500,
                                   color: selected ? _green : _lightText,
                                 ),
                               ),
+                            ),
                             ],
                           ),
                         ),

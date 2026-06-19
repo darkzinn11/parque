@@ -80,6 +80,8 @@ docs/
 - Race condition eliminada no backend: `CreateIfNoConflict` com `SELECT FOR UPDATE` em transaction
 - Rejeição atômica: `UpdateStatusWithMotivo` atualiza status + motivo em query única (sem janela de falha parcial)
 - ListAll admin com paginação: `?page=1&page_size=100` (default 100, cap 500) + header `X-Total-Count`
+- **Notificação participantes (2026-06-18)**: quando reserva aprovada, backend notifica via FCM os participantes que têm conta (lookup por CPF via `GetByListOfCPF`); mensagem: "Você tem uma reserva confirmada! ✓"; best-effort silencioso para CPFs sem conta
+- **Validação Flutter (2026-06-18)**: `_collectParticipants()` bloqueia CPF duplicado entre participantes e CPF igual ao do líder
 
 ## Sistema de denúncias (implementado)
 - Flutter: `DenuncieScreen` com CEP auto-fill, fotos comprimidas (1280px, 75% JPEG), dados do usuário logado pré-preenchidos
@@ -92,6 +94,7 @@ docs/
 - Rate limit: **10 tentativas/min por IP** em `/login`, `/forgot-password`, `/register`, `/denuncias/upload`
 - Senha validada no backend: `min=8` (alinhado com Flutter)
 - CPF validado no backend: exatamente 11 dígitos (strip de máscara antes de validar)
+- CPF é **UNIQUE** no banco (`UNIQUE INDEX idx_users_cpf`) — `Register()` checa via `GetByCPF` antes de `Create()`; DB constraint como backstop de race condition; HTTP 409 + `"CPF já cadastrado"` se duplicado
 - Telefone validado no backend: 10–11 dígitos (strip de máscara)
 - `/forgot-password` sempre retorna 200 (não revela se email existe)
 - `me()` faz logout automático ao receber 401 (JWT expirado)
@@ -117,6 +120,12 @@ docs/
 - Backend envia push em: aprovação, rejeição (com motivo + deeplink editar) e cancelamento pelo gestor
 - Para verificar token no banco: `SELECT user_id, platform, updated_at FROM fcm_tokens ORDER BY updated_at DESC LIMIT 5;`
 - Para verificar FCM no backend: `journalctl -u backend-park -n 100 | grep FCM`
+
+## Race condition em solicitações de evento (implementado 2026-06-18)
+- Múltiplas solicitações pendentes para o mesmo espaço/data/horário podem coexistir na fila do admin
+- Ao **aprovar**: verifica se já há evento `Aprovado` no mesmo slot → bloqueia (HTTP 409) se houver; auto-rejeita todos os `Pendentes` conflitantes com motivo "Horário ocupado por outra solicitação aprovada"; tudo em transação única
+- Método `GetConflicting(ctx, spaceID, date, horaInicio, horaFim, excludeID)` no `EventRequestRepository`
+- Reservas e eventos NÃO compartilham os mesmos espaços — sem cross-check entre os dois sistemas
 
 ## Sistema de eventos (implementado 2026-06-12)
 - Fluxo Flutter: Home → EventParkSelectionScreen → EventRequestScreen (espaço + data + hora) → EventDetailsScreen (formulário) → EventRequestSuccessScreen
@@ -162,12 +171,16 @@ docs/
 1. **TestFlight push notifications**: adicionar capability "Push Notifications" no Xcode → Archive → nova build TestFlight → instalar → logar → aceitar permissão
 2. **Resend**: criar conta em resend.com, verificar domínio, adicionar `RESEND_API_KEY` e `EMAIL_FROM` no `.env` do backend
 3. **PAINEL-PARK**: não está no git — arquivos salvos localmente mas sem versionamento
-4. **Deploy pendente (2026-06-17)**: rodar `deploy.sh` no PARQUE-BACK para subir feature reserva 1h/2h + redesign status avaliações ao servidor
-5. **Commits Flutter pendentes (2026-06-17)**: branch `feat/reservations-redesign` — tudo implementado mas não commitado (code-review fixes + reserva 1h/2h + redesign avaliações + fix share button + map picker logos reais)
-6. **Email Brevo**: migrado para SMTP — variáveis necessárias: `BREVO_SMTP_LOGIN`, `BREVO_SMTP_PASSWORD`, `EMAIL_FROM`
+4. **Deploy pendente (2026-06-18)**: rodar `deploy.sh` no PARQUE-BACK para subir todos os fixes backend (CPF único + notif participantes + race condition eventos)
+5. **Email Brevo**: migrado para SMTP — variáveis necessárias: `BREVO_SMTP_LOGIN`, `BREVO_SMTP_PASSWORD`, `EMAIL_FROM`
+
+## Android — padrões de segurança obrigatórios (2026-06-18)
+- **Safe area em bottom sheets**: sempre somar `MediaQuery.of(context).padding.bottom` ao padding do container + `useSafeArea: true` no `showModalBottomSheet`; `viewInsets.bottom` é só o teclado, não cobre a nav bar gestural
+- **Bottom bar responsiva**: `_SlidingTabBar` em `app_router.dart` usa altura dinâmica (56px em telas < 380px, 60px em telas maiores)
+- **Segmented control**: labels com `maxLines: 1, overflow: TextOverflow.ellipsis` para evitar overflow em telas compactas
 
 ## Componentes globais importantes
-- `AppToast` (`lib/widgets/app_toast.dart`) — toast estilo Duolingo, usar em vez de SnackBar
+- `AppToast` (`lib/widgets/app_toast.dart`) — toast estilo Duolingo, usar em vez de SnackBar; SEMPRE incluir `decoration: TextDecoration.none` no `GoogleFonts.poppins()` dentro de `OverlayEntry` (sem isso herda sublinhado amarelo do DefaultTextStyle raiz)
 - `FavoriteButton` (`lib/widgets/favorite_button.dart`) — animação Lottie
 - `LoginRequired` (`lib/widgets/login_required.dart`) — guard para telas protegidas
 - `PasswordStrengthIndicator` (`lib/widgets/password_strength_indicator.dart`) — barra + checklist

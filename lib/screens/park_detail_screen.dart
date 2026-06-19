@@ -103,6 +103,7 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _AddReviewBottomSheet(
         parkId: parkId,
@@ -980,6 +981,48 @@ class _SpaceCard extends StatelessWidget {
   final Space space;
   final String? Function(String?) toImageUrl;
 
+  void _showFullImage(BuildContext context, String imgUrl) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              panEnabled: true,
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: CachedNetworkImage(
+                imageUrl: imgUrl,
+                fit: BoxFit.contain,
+                width: double.infinity,
+                height: double.infinity,
+              ),
+            ),
+            Positioned(
+              top: 40,
+              right: 16,
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final imgUrl = toImageUrl(space.imageURL);
@@ -990,29 +1033,32 @@ class _SpaceCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: SizedBox(
-                height: 200,
-                width: double.infinity,
-                child: imgUrl != null
-                    ? CachedNetworkImage(
-                        imageUrl: imgUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (_, __) => const ColoredBox(color: Color(0xFFE5EFE2)),
-                        errorWidget: (_, __, ___) => Container(
+            GestureDetector(
+              onTap: imgUrl != null ? () => _showFullImage(context, imgUrl) : null,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  height: 200,
+                  width: double.infinity,
+                  child: imgUrl != null
+                      ? CachedNetworkImage(
+                          imageUrl: imgUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => const ColoredBox(color: Color(0xFFE5EFE2)),
+                          errorWidget: (_, __, ___) => Container(
+                            color: const Color(0xFFE5EFE2),
+                            child: const Center(
+                              child: Icon(Icons.park_outlined, color: kBrandGreen, size: 40),
+                            ),
+                          ),
+                        )
+                      : Container(
                           color: const Color(0xFFE5EFE2),
                           child: const Center(
                             child: Icon(Icons.park_outlined, color: kBrandGreen, size: 40),
                           ),
                         ),
-                      )
-                    : Container(
-                        color: const Color(0xFFE5EFE2),
-                        child: const Center(
-                          child: Icon(Icons.park_outlined, color: kBrandGreen, size: 40),
-                        ),
-                      ),
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -1094,7 +1140,18 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
 
     if (source == null) return;
 
-    final file = await _picker.pickImage(source: source, imageQuality: 80);
+    final XFile? file;
+    try {
+      file = await _picker.pickImage(source: source, imageQuality: 80);
+    } catch (e) {
+      // Android pode lançar PlatformException (câmera indisponível,
+      // 'already_active', ou perda do resultado se a Activity é recriada).
+      if (mounted) {
+        AppToast.show(context, 'Não foi possível abrir a câmera/galeria.',
+            type: ToastType.error);
+      }
+      return;
+    }
     if (file == null) return;
 
     setState(() {
@@ -1179,9 +1236,10 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final bottomSafe = MediaQuery.of(context).padding.bottom;
 
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 16, 24, 24 + bottomInset),
+      padding: EdgeInsets.fromLTRB(24, 16, 24, 24 + bottomInset + bottomSafe),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -1320,20 +1378,37 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
             ),
             const SizedBox(height: 8),
             if (_selectedPhoto == null)
-              OutlinedButton.icon(
-                onPressed: _pickPhoto,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: kBrandGreen,
-                  side: const BorderSide(color: Color(0xFFE5EFE2)),
-                  shape: RoundedRectangleBorder(
+              GestureDetector(
+                onTap: _pickPhoto,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFAFBF6),
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFD0D5DD), width: 1.5),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                icon: const Icon(Icons.camera_alt_outlined, size: 20),
-                label: Text(
-                  'Adicionar foto (opcional)',
-                  style: GoogleFonts.poppins(fontSize: 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.camera_alt_outlined, size: 32, color: Color(0xFF9BA3A0)),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Toque para adicionar foto',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          color: const Color(0xFF9BA3A0),
+                        ),
+                      ),
+                      Text(
+                        '(opcional)',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: const Color(0xFFB0B8B5),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               )
             else

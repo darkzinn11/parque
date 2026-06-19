@@ -474,23 +474,30 @@ class _TabScaffoldState extends State<_TabScaffold> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: widget.navigationShell,
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: border)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SizedBox(
-            height: 64,
-            child: _SlidingTabBar(
-              selectedIndex: _currentIndex,
-              tabs: _tabs,
-              color: green,
-              onTap: _onTap,
+      bottomNavigationBar: Builder(
+        builder: (context) {
+          final compact = MediaQuery.of(context).size.width < 380;
+          final barHeight = compact ? 56.0 : 60.0;
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: border)),
             ),
-          ),
-        ),
+            child: SafeArea(
+              top: false,
+              child: SizedBox(
+                height: barHeight,
+                child: _SlidingTabBar(
+                  selectedIndex: _currentIndex,
+                  tabs: _tabs,
+                  color: green,
+                  onTap: _onTap,
+                  compact: compact,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -510,12 +517,14 @@ class _SlidingTabBar extends StatelessWidget {
     required this.tabs,
     required this.color,
     required this.onTap,
+    this.compact = false,
   });
 
   final int selectedIndex;
   final List<_TabItem> tabs;
   final Color color;
   final ValueChanged<int> onTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -530,9 +539,9 @@ class _SlidingTabBar extends StatelessWidget {
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeInOut,
               left: tabWidth * selectedIndex + tabWidth * 0.15,
-              top: 6,
+              top: 4,
               width: tabWidth * 0.7,
-              height: 52,
+              height: compact ? 48 : 52,
               child: Container(
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.10),
@@ -561,14 +570,16 @@ class _SlidingTabBar extends StatelessWidget {
                             child: Icon(
                               tabs[i].icon,
                               color: color,
-                              size: 24,
+                              size: compact ? 22 : 24,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 3),
                           Text(
                             tabs[i].label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 11,
+                              fontSize: compact ? 10 : 11,
                               fontWeight: selected
                                   ? FontWeight.w700
                                   : FontWeight.w500,
