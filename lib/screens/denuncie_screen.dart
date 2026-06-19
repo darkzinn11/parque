@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -45,7 +47,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   String? _enderecoCapturado;
   bool _loadingGps = false;
 
-  // Local da denúncia — agora só parque + local específico opcional
+  // Local da ocorrência — agora só parque + local específico opcional
   final _localEspecificoController = TextEditingController();
 
   // Parque relacionado (obrigatório)
@@ -67,6 +69,10 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   bool _informacoesVerdadeiras = false;
 
   bool _enviando = false;
+  bool _success = false;
+  bool _parkError = false;
+  final _scrollController = ScrollController();
+  final _parkSectionKey = GlobalKey();
 
   static const _categorias = [
     'Infraestrutura',
@@ -86,6 +92,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     _celularController.dispose();
     _localEspecificoController.dispose();
     _descricaoController.dispose();
+    _scrollController.dispose();
     AuthService.instance.removeListener(_onAuthChanged);
     super.dispose();
   }
@@ -197,13 +204,22 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   // ── Upload de fotos ──────────────────────────────────────────────────────────
 
   Future<void> _pickFotos() async {
-    final picked = await ImagePicker().pickMultiImage(
-      imageQuality: 75,
-      maxWidth: 1280,
-      maxHeight: 1280,
-    );
-    if (picked.isEmpty) return;
-    setState(() => _fotosLocais.addAll(picked));
+    try {
+      final picked = await ImagePicker().pickMultiImage(
+        imageQuality: 75,
+        maxWidth: 1280,
+        maxHeight: 1280,
+      );
+      if (picked.isEmpty) return;
+      if (mounted) setState(() => _fotosLocais.addAll(picked));
+    } catch (e) {
+      // Android pode lançar PlatformException ('already_active' em toque duplo,
+      // ou perda do resultado quando a Activity é recriada sob pressão de memória).
+      if (mounted) {
+        AppToast.show(context, 'Não foi possível abrir a galeria. Tente novamente.',
+            type: ToastType.error);
+      }
+    }
   }
 
   Future<String?> _uploadFoto(XFile foto) async {
@@ -223,11 +239,24 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   // ── Submit ───────────────────────────────────────────────────────────────────
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-
+    // Validate park first (not a form field)
     if (_selectedParkId == null) {
-      AppToast.show(context, 'Selecione o parque da denúncia.',
+      setState(() => _parkError = true);
+      AppToast.show(context, 'Selecione o parque da ocorrência.',
           type: ToastType.warning);
+      final ctx = _parkSectionKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(ctx,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+            alignment: 0.1);
+      }
+      return;
+    }
+
+    if (!_formKey.currentState!.validate()) {
+      _scrollController.animateTo(0,
+          duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
       return;
     }
 
@@ -261,6 +290,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
         'categoria': _categoria,
         'descricao': _descricaoController.text.trim(),
         'fotos': fotosUrls,
+        'aceitou_termos': _concordoTermos,
         if (_selectedParkId != null) 'park_id': _selectedParkId,
       };
 
@@ -274,12 +304,12 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
       if (!mounted) return;
 
       if (response.statusCode == 201) {
-        _mostrarDialogoSucesso(context);
+        if (mounted) setState(() => _success = true);
       } else {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         AppToast.show(
           context,
-          data['error']?.toString() ?? 'Erro ao enviar denúncia.',
+          data['error']?.toString() ?? 'Erro ao enviar colaboração.',
           type: ToastType.error,
         );
       }
@@ -291,71 +321,62 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     }
   }
 
-  void _mostrarDialogoSucesso(BuildContext outerContext) {
-    showDialog(
-      context: outerContext,
-      barrierDismissible: false,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+  Widget _buildSuccessScreen() {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF0FDF4),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.check_circle_outline_rounded,
-                  color: Color(0xFF16A34A),
-                  size: 48,
-                ),
-              ),
-              const SizedBox(height: 20),
+              const Spacer(),
               Text(
-                'Obrigado pelo seu relato!',
+                'Colaboração enviada\ncom sucesso!',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
+                  color: kBrandGreen,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                ),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                height: 220,
+                child: SvgPicture.asset(
+                  'assets/images/success.svg',
+                  fit: BoxFit.contain,
+                ),
+              ),
+              const SizedBox(height: 32),
+              Text(
+                'Sua colaboração foi enviada e será\nanalisada pela nossa equipe.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
                   color: kDarkGray,
+                  fontSize: 16,
+                  height: 1.5,
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Sua denúncia de $_categoria foi registrada com sucesso e nossa equipe já foi notificada.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  color: kDarkGray.withValues(alpha: 0.7),
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 24),
+              const Spacer(),
               SizedBox(
                 width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
+                height: 52,
+                child: FilledButton.icon(
+                  onPressed: () => context.go('/tabs/home'),
+                  style: FilledButton.styleFrom(
                     backgroundColor: kBrandGreen,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius: BorderRadius.circular(26),
                     ),
-                    elevation: 0,
                   ),
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                    outerContext.pop();
-                  },
-                  child: Text(
-                    'Entendido',
+                  icon: const Icon(Icons.home_outlined, size: 20),
+                  label: Text(
+                    'Ir para a Home',
                     style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -371,6 +392,8 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_success) return _buildSuccessScreen();
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -382,7 +405,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
           onPressed: () => context.pop(),
         ),
         title: Text(
-          'Faça sua denúncia',
+          'Colabore',
           style: GoogleFonts.poppins(
             color: kBrandGreen,
             fontWeight: FontWeight.w700,
@@ -394,12 +417,13 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
       body: Form(
         key: _formKey,
         child: SingleChildScrollView(
+          controller: _scrollController,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Informe os dados abaixo para registrar sua denúncia.',
+                'Informe os dados abaixo para registrar sua colaboração.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
                   fontSize: 14,
@@ -539,14 +563,18 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _buildSectionHeader(
-                        Icons.location_on_outlined, 'Local da denúncia'),
+                        Icons.location_on_outlined, 'Local da ocorrência'),
                     const SizedBox(height: 20),
                     // Parque (obrigatório) — dropdown customizado inline
                     Container(
+                      key: _parkSectionKey,
                       margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: kBrandGreen, width: 2),
+                        border: Border.all(
+                          color: _parkError ? Colors.red.shade400 : kBrandGreen,
+                          width: 2,
+                        ),
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
@@ -641,6 +669,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                                     onTap: () => setState(() {
                                       _selectedParkId = p.id;
                                       _parkDropdownOpen = false;
+                                      _parkError = false;
                                     }),
                                     child: ColoredBox(
                                       color: selected
@@ -804,7 +833,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
 
                     // Descrição
                     _buildField(
-                      hint: 'Descreva a denúncia aqui...',
+                      hint: 'Descreva aqui o que você quer sinalizar ou sugerir...',
                       controller: _descricaoController,
                       maxLines: 4,
                       validator: (v) =>
@@ -943,11 +972,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                     _buildSectionHeader(
                         Icons.check_circle_outline_rounded, 'Confirmação'),
                     const SizedBox(height: 20),
-                    _buildCheckbox(
-                      text: 'Concordo com os termos e condições.',
-                      value: _concordoTermos,
-                      onChanged: (v) => setState(() => _concordoTermos = v),
-                    ),
+                    _buildTermosCheckbox(),
                     const SizedBox(height: 4),
                     _buildCheckbox(
                       text: 'Afirmo que as informações aqui prestadas são verdadeiras.',
@@ -1120,6 +1145,83 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     );
   }
 
+  void _mostrarTermos() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _TermosSheet(),
+    );
+  }
+
+  Widget _buildTermosCheckbox() {
+    final recognizer = TapGestureRecognizer()..onTap = _mostrarTermos;
+    return GestureDetector(
+      onTap: () => setState(() => _concordoTermos = !_concordoTermos),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: kBrandGreen, width: 2),
+                color: _concordoTermos ? kBrandGreen : Colors.transparent,
+              ),
+              child: _concordoTermos
+                  ? const Icon(Icons.check, color: Colors.white, size: 14)
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: 'Concordo com os ',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: kDarkGray,
+                        height: 1.3,
+                      ),
+                    ),
+                    TextSpan(
+                      text: 'termos e condições',
+                      recognizer: recognizer,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: kBrandGreen,
+                        height: 1.3,
+                        decoration: TextDecoration.underline,
+                        decorationColor: kBrandGreen,
+                      ),
+                    ),
+                    TextSpan(
+                      text: '.',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: kDarkGray,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildCheckbox({
     required String text,
     required bool value,
@@ -1160,6 +1262,147 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
               ),
             ],
           ),
+        ),
+      );
+}
+
+// ─── Termos e Condições ───────────────────────────────────────────────────────
+
+class _TermosSheet extends StatelessWidget {
+  const _TermosSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, controller) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFDDE3D5),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  const Icon(Icons.article_outlined, color: kBrandGreen, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Termos e Condições de Uso',
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: kDarkGray,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: kSubtitleColor),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: controller,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _secao('1. Para que serve',
+                        'O "Colabore" é um canal para você registrar problemas, sugestões ou melhorias nos parques públicos gerenciados pela Secretaria de Meio Ambiente e Recursos Hídricos do Maranhão (SEMA-MA).'),
+                    _secao('2. O que fazemos com suas informações',
+                        'Nome, e-mail, celular, localização e fotos são usados para analisar e responder à sua colaboração. Não repassamos nada disso a terceiros.'),
+                    _secao('3. O que você confirma ao enviar',
+                        'Ao enviar uma colaboração, você confirma que as informações são verdadeiras e que não está incluindo conteúdo falso, ofensivo ou ilegal. Informações falsas podem gerar responsabilidade civil e criminal.'),
+                    _secao('4. Seus dados e a LGPD',
+                        'Seus dados são tratados conforme a Lei Geral de Proteção de Dados (Lei nº 13.709/2018). Só compartilhamos informações com terceiros quando a lei exigir isso.'),
+                    _secao('5. Sobre as fotos',
+                        'As fotos devem mostrar apenas a situação que você está relatando. Não envie imagens que identifiquem pessoas sem a permissão delas.'),
+                    _secao('6. Quando você recebe retorno',
+                        'A equipe do parque analisa cada colaboração. O prazo varia conforme o caso.'),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ao marcar "Concordo com os termos e condições", você confirma que leu e aceita o que está aqui.',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: kSubtitleColor,
+                        fontStyle: FontStyle.italic,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: kBrandGreen,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(26),
+                          ),
+                        ),
+                        child: Text(
+                          'Entendido',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _secao(String titulo, String texto) => Padding(
+        padding: const EdgeInsets.only(bottom: 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              titulo,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: kDarkGray,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              texto,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: kSubtitleColor,
+                height: 1.6,
+              ),
+            ),
+          ],
         ),
       );
 }

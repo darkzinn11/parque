@@ -50,6 +50,16 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
   late final DateTime _minDate;
   late final DateTime _maxDate;
 
+  bool _spaceError = false;
+  bool _dateError = false;
+  bool _horaInicioError = false;
+  bool _horaFimError = false;
+  final _scrollController = ScrollController();
+  final _spaceSectionKey = GlobalKey();
+  final _dateSectionKey = GlobalKey();
+  final _horaInicioSectionKey = GlobalKey();
+  final _horaFimSectionKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -90,21 +100,46 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
     return _timeSlots.where((t) => _toMin(t) > min).toList();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   void _continue() {
-    if (_selectedSpaceIds.isEmpty) {
-      AppToast.show(context, 'Selecione ao menos um espaço.', type: ToastType.warning);
-      return;
-    }
-    if (_selectedDate == null) {
-      AppToast.show(context, 'Selecione uma data para o evento.', type: ToastType.warning);
-      return;
-    }
-    if (_horaInicio == null) {
-      AppToast.show(context, 'Selecione o horário de início.', type: ToastType.warning);
-      return;
-    }
-    if (_horaFim == null) {
-      AppToast.show(context, 'Selecione o horário de término.', type: ToastType.warning);
+    final spaceErr = _selectedSpaceIds.isEmpty;
+    final dateErr = _selectedDate == null;
+    final horaInicioErr = _horaInicio == null;
+    final horaFimErr = _horaInicio != null && _horaFim == null;
+
+    if (spaceErr || dateErr || horaInicioErr || horaFimErr) {
+      setState(() {
+        _spaceError = spaceErr;
+        _dateError = dateErr;
+        _horaInicioError = horaInicioErr;
+        _horaFimError = horaFimErr;
+      });
+      // Toast para primeiro erro
+      if (spaceErr) {
+        AppToast.show(context, 'Selecione ao menos um espaço.', type: ToastType.warning);
+        Scrollable.ensureVisible(_spaceSectionKey.currentContext!,
+            duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+      } else if (dateErr) {
+        AppToast.show(context, 'Selecione uma data para o evento.', type: ToastType.warning);
+        Scrollable.ensureVisible(_dateSectionKey.currentContext!,
+            duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+      } else if (horaInicioErr) {
+        AppToast.show(context, 'Selecione o horário de início.', type: ToastType.warning);
+        Scrollable.ensureVisible(_horaInicioSectionKey.currentContext!,
+            duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+      } else {
+        AppToast.show(context, 'Selecione o horário de término.', type: ToastType.warning);
+        final ctx = _horaFimSectionKey.currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(ctx,
+              duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+        }
+      }
       return;
     }
 
@@ -147,6 +182,7 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
         children: [
           Expanded(
             child: ListView(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               children: [
                 // Banner antecedência
@@ -181,14 +217,22 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
                 const SizedBox(height: 24),
 
                 // Seção: Espaços
-                const _SectionLabel(label: 'Onde: Espaços'),
+                _SectionLabel(
+                  key: _spaceSectionKey,
+                  label: 'Onde: Espaços',
+                  hasError: _spaceError,
+                ),
                 const SizedBox(height: 12),
                 _buildSpacesSection(),
 
                 const SizedBox(height: 24),
 
                 // Seção: Data
-                const _SectionLabel(label: 'Quando: Data do evento'),
+                _SectionLabel(
+                  key: _dateSectionKey,
+                  label: 'Quando: Data do evento',
+                  hasError: _dateError,
+                ),
                 const SizedBox(height: 12),
                 _CalendarCard(
                   displayMonth: _displayMonth,
@@ -197,8 +241,12 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
                   maxDate: _maxDate,
                   onPrevMonth: _prevMonth,
                   onNextMonth: _nextMonth,
+                  hasError: _dateError,
                   onDateSelected: (d) {
-                    setState(() => _selectedDate = d);
+                    setState(() {
+                      _selectedDate = d;
+                      _dateError = false;
+                    });
                   },
                 ),
 
@@ -220,14 +268,20 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
                 const SizedBox(height: 24),
 
                 // Seção: Horário início
-                const _SectionLabel(label: 'Horário de início'),
+                _SectionLabel(
+                  key: _horaInicioSectionKey,
+                  label: 'Horário de início',
+                  hasError: _horaInicioError,
+                ),
                 const SizedBox(height: 12),
                 _TimeChipsSection(
                   slots: _timeSlots,
                   selected: _horaInicio,
+                  hasError: _horaInicioError,
                   onSelected: (t) {
                     setState(() {
                       _horaInicio = t;
+                      _horaInicioError = false;
                       if (_horaFim != null && _toMin(_horaFim!) <= _toMin(t)) {
                         _horaFim = null;
                       }
@@ -238,12 +292,20 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
                 // Seção: Horário término (aparece só após início ser escolhido)
                 if (_horaInicio != null) ...[
                   const SizedBox(height: 24),
-                  const _SectionLabel(label: 'Horário de término'),
+                  _SectionLabel(
+                    key: _horaFimSectionKey,
+                    label: 'Horário de término',
+                    hasError: _horaFimError,
+                  ),
                   const SizedBox(height: 12),
                   _TimeChipsSection(
                     slots: _endOptions,
                     selected: _horaFim,
-                    onSelected: (t) => setState(() => _horaFim = t),
+                    hasError: _horaFimError,
+                    onSelected: (t) => setState(() {
+                      _horaFim = t;
+                      _horaFimError = false;
+                    }),
                   ),
                 ],
 
@@ -314,6 +376,7 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
                 _selectedSpaceIds.remove(space.id);
               } else {
                 _selectedSpaceIds.add(space.id);
+                _spaceError = false;
               }
             });
           },
@@ -359,8 +422,9 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
 // ─── Sub-widgets ──────────────────────────────────────────────────────────
 
 class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.label});
+  const _SectionLabel({super.key, required this.label, this.hasError = false});
   final String label;
+  final bool hasError;
 
   @override
   Widget build(BuildContext context) {
@@ -369,7 +433,7 @@ class _SectionLabel extends StatelessWidget {
       style: GoogleFonts.poppins(
         fontSize: 14,
         fontWeight: FontWeight.w700,
-        color: _dark,
+        color: hasError ? Colors.red.shade600 : _dark,
       ),
     );
   }
@@ -385,6 +449,7 @@ class _CalendarCard extends StatelessWidget {
     required this.onPrevMonth,
     required this.onNextMonth,
     required this.onDateSelected,
+    this.hasError = false,
   });
 
   final DateTime displayMonth;
@@ -394,6 +459,7 @@ class _CalendarCard extends StatelessWidget {
   final VoidCallback onPrevMonth;
   final VoidCallback onNextMonth;
   final ValueChanged<DateTime> onDateSelected;
+  final bool hasError;
 
   static const _weekLabels = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 
@@ -416,7 +482,10 @@ class _CalendarCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: _cardBg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _green.withValues(alpha: 0.25), width: 1.5),
+        border: Border.all(
+          color: hasError ? Colors.red.shade400 : _green.withValues(alpha: 0.25),
+          width: 1.5,
+        ),
       ),
       child: Column(
         children: [
@@ -560,11 +629,13 @@ class _TimeChipsSection extends StatelessWidget {
     required this.slots,
     required this.selected,
     required this.onSelected,
+    this.hasError = false,
   });
 
   final List<String> slots;
   final String? selected;
   final ValueChanged<String> onSelected;
+  final bool hasError;
 
   static const _periods = [
     _Period('Manhã', 7, 12),
@@ -622,7 +693,11 @@ class _TimeChipsSection extends StatelessWidget {
                         color: isSelected ? _green : Colors.white,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: isSelected ? _green : _green.withValues(alpha: 0.4),
+                          color: isSelected
+                              ? _green
+                              : hasError
+                                  ? Colors.red.shade400
+                                  : _green.withValues(alpha: 0.4),
                           width: isSelected ? 2 : 1.5,
                         ),
                         boxShadow: isSelected

@@ -64,6 +64,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   ParkActivityType? _selectedType;
   bool _apoioBPA = false;
   bool _isSubmitting = false;
+  final _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -93,6 +94,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     _cpfCtrl.dispose();
     _emailCtrl.dispose();
     _tipoAtividadeFreeCtrl.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -188,24 +190,14 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   }
 
   void _onContinue() {
-    if (!_formKey.currentState!.validate()) return;
-
-    final String tipoAtividade;
-    if (_activityTypes.isEmpty) {
-      tipoAtividade = _tipoAtividadeFreeCtrl.text.trim();
-      if (tipoAtividade.isEmpty) {
-        AppToast.show(context, 'Informe o tipo de atividade.', type: ToastType.warning);
-        return;
-      }
-    } else {
-      if (_selectedType == null) {
-        AppToast.show(context, 'Selecione o tipo de atividade.', type: ToastType.warning);
-        return;
-      }
-      tipoAtividade = _selectedType!.nome;
+    if (!_formKey.currentState!.validate()) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+      return;
     }
-
-    // Exibe bottom sheet com regras
     _showRulesSheet();
   }
 
@@ -466,6 +458,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           children: [
             Expanded(
               child: ListView(
+                controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 children: [
                   // Banner resumo

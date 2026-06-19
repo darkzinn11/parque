@@ -40,6 +40,7 @@ class ReservationFormScreen extends StatefulWidget {
 class _ParticipantControllers {
   final TextEditingController nome = TextEditingController();
   final TextEditingController cpf = TextEditingController();
+  final GlobalKey key = GlobalKey();
   void dispose() {
     nome.dispose();
     cpf.dispose();
@@ -57,6 +58,8 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
   Reservation? _fetchedReservation;
   Timer? _countdownTimer;
   Duration? _timeLeft;
+  final Set<String> _participantErrors = {};
+  final _scrollController = ScrollController();
 
   // Dados derivados
   late int _spaceId;
@@ -170,6 +173,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _scrollController.dispose();
     for (final c in _participants) {
       c.dispose();
     }
@@ -206,26 +210,62 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
     final result = <Participant>[];
     final seen = <String>{};
+    final newErrors = <String>{};
+    String? firstToast;
+    int? firstErrorIdx;
 
-    for (final c in _participants) {
+    for (int i = 0; i < _participants.length; i++) {
+      final c = _participants[i];
       final nome = c.nome.text.trim();
       final cpf = c.cpf.text.trim();
-      if (nome.isEmpty || cpf.length < 14) {
-        AppToast.show(context, 'Preencha nome e CPF de todos os participantes.', type: ToastType.error);
-        return null;
+      if (nome.isEmpty) {
+        newErrors.add('${i}_nome');
+        firstErrorIdx ??= i;
+        firstToast ??= 'Preencha nome e CPF de todos os participantes.';
       }
+      if (cpf.length < 14) {
+        newErrors.add('${i}_cpf');
+        firstErrorIdx ??= i;
+        firstToast ??= 'Preencha nome e CPF de todos os participantes.';
+      }
+      if (nome.isEmpty || cpf.length < 14) continue;
+
       final cpfDigits = _stripCpf(cpf);
       if (leaderCpf.isNotEmpty && cpfDigits == leaderCpf) {
-        AppToast.show(context, 'O responsável não pode ser listado como participante.', type: ToastType.error);
-        return null;
+        newErrors.add('${i}_cpf');
+        firstErrorIdx ??= i;
+        firstToast ??= 'O responsável não pode ser listado como participante.';
+        continue;
       }
       if (seen.contains(cpfDigits)) {
-        AppToast.show(context, 'CPF duplicado na lista de participantes.', type: ToastType.error);
-        return null;
+        newErrors.add('${i}_cpf');
+        firstErrorIdx ??= i;
+        firstToast ??= 'CPF duplicado na lista de participantes.';
+        continue;
       }
       seen.add(cpfDigits);
       result.add(Participant(nome: nome, cpf: cpf));
     }
+
+    if (newErrors.isNotEmpty) {
+      setState(() {
+        _participantErrors.clear();
+        _participantErrors.addAll(newErrors);
+      });
+      if (firstToast != null) {
+        AppToast.show(context, firstToast, type: ToastType.error);
+      }
+      if (firstErrorIdx != null) {
+        final ctx = _participants[firstErrorIdx].key.currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(ctx,
+              duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+        }
+      }
+      return null;
+    }
+
+    setState(() => _participantErrors.clear());
     return result;
   }
 
@@ -376,6 +416,7 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
         children: [
           Expanded(
             child: ListView(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
               children: [
                 if (widget.isEdit) _buildRejectedBanner(),
@@ -569,20 +610,32 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
 
   Widget _buildParticipantCard(int index) {
     final c = _participants[index];
+    final nomeErr = _participantErrors.contains('${index}_nome');
+    final cpfErr = _participantErrors.contains('${index}_cpf');
+    final hasErr = nomeErr || cpfErr;
     return Container(
+      key: c.key,
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFECECEC)),
+        border: Border.all(
+          color: hasErr ? Colors.red.shade300 : const Color(0xFFECECEC),
+        ),
       ),
       child: Column(
         children: [
           Row(
             children: [
-              Text('Participante ${index + 1}',
-                  style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: _dark)),
+              Text(
+                'Participante ${index + 1}',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: hasErr ? Colors.red.shade600 : _dark,
+                ),
+              ),
               const Spacer(),
               InkWell(
                 onTap: () => _removeParticipant(index),
@@ -594,34 +647,46 @@ class _ReservationFormScreenState extends State<ReservationFormScreen> {
           TextField(
             controller: c.nome,
             textCapitalization: TextCapitalization.words,
-            decoration: _fieldDecoration('Nome completo'),
+            decoration: _fieldDecoration('Nome completo', hasError: nomeErr),
             style: GoogleFonts.poppins(fontSize: 13.5, color: _dark),
+            onChanged: (_) {
+              if (nomeErr) setState(() => _participantErrors.remove('${index}_nome'));
+            },
           ),
           const SizedBox(height: 10),
           TextField(
             controller: c.cpf,
             keyboardType: TextInputType.number,
             inputFormatters: [_CpfInputFormatter()],
-            decoration: _fieldDecoration('CPF'),
+            decoration: _fieldDecoration('CPF', hasError: cpfErr),
             style: GoogleFonts.poppins(fontSize: 13.5, color: _dark),
+            onChanged: (_) {
+              if (cpfErr) setState(() => _participantErrors.remove('${index}_cpf'));
+            },
           ),
         ],
       ),
     );
   }
 
-  InputDecoration _fieldDecoration(String hint) {
-    final border = OutlineInputBorder(
+  InputDecoration _fieldDecoration(String hint, {bool hasError = false}) {
+    final normalBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
       borderSide: const BorderSide(color: Color(0xFFECECEC)),
+    );
+    final errorBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: Colors.red.shade400),
     );
     return InputDecoration(
       hintText: hint,
       hintStyle: GoogleFonts.poppins(fontSize: 13, color: _lightGray),
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      enabledBorder: border,
-      focusedBorder: border.copyWith(borderSide: const BorderSide(color: _green)),
+      enabledBorder: hasError ? errorBorder : normalBorder,
+      focusedBorder: hasError
+          ? errorBorder.copyWith(borderSide: BorderSide(color: Colors.red.shade600, width: 1.5))
+          : normalBorder.copyWith(borderSide: const BorderSide(color: _green)),
     );
   }
 }
