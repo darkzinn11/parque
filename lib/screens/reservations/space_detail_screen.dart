@@ -67,6 +67,48 @@ class _SpaceDetailScreenState extends State<SpaceDetailScreen> {
     return '$baseUrl/$cleanPath';
   }
 
+  void _showFullImage(String imgUrl) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              panEnabled: true,
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: CachedNetworkImage(
+                imageUrl: imgUrl,
+                fit: BoxFit.contain,
+                width: double.infinity,
+                height: double.infinity,
+              ),
+            ),
+            Positioned(
+              top: 40,
+              right: 16,
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -119,17 +161,20 @@ class _SpaceDetailScreenState extends State<SpaceDetailScreen> {
                           if (_images.isNotEmpty) ...[
                             Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 24),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: AspectRatio(
-                                  aspectRatio: 16 / 10,
-                                  child: CachedNetworkImage(
-                                    imageUrl: _toImageUrl(_images[_selectedImageIndex])!,
-                                    fit: BoxFit.cover,
-                                    placeholder: (_, __) => Container(color: Colors.grey[100]),
-                                    errorWidget: (_, __, ___) => Container(
-                                      color: Colors.grey[100],
-                                      child: const Icon(Icons.image_not_supported),
+                              child: GestureDetector(
+                                onTap: () => _showFullImage(_toImageUrl(_images[_selectedImageIndex])!),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: AspectRatio(
+                                    aspectRatio: 16 / 10,
+                                    child: CachedNetworkImage(
+                                      imageUrl: _toImageUrl(_images[_selectedImageIndex])!,
+                                      fit: BoxFit.cover,
+                                      placeholder: (_, __) => Container(color: Colors.grey[100]),
+                                      errorWidget: (_, __, ___) => Container(
+                                        color: Colors.grey[100],
+                                        child: const Icon(Icons.image_not_supported),
+                                      ),
                                     ),
                                   ),
                                 ),
