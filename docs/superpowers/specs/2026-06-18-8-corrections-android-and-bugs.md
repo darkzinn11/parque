@@ -262,6 +262,52 @@ Uma linha. Resolve completamente.
 
 ---
 
+---
+
+## Item 9 — Race condition em solicitações de evento (mesmo espaço/data/horário)
+
+### Problema
+Múltiplos usuários podem solicitar eventos no mesmo espaço, data e horário simultaneamente. Sem verificação na aprovação, o admin poderia aprovar dois eventos conflitantes para o mesmo slot.
+
+**Reservas já estão protegidas** (`CreateIfNoConflict` com `SELECT FOR UPDATE`). Esse item cobre apenas eventos.
+
+### Comportamento definido
+
+**Na criação:** sem bloqueio — múltiplas solicitações pendentes para o mesmo slot podem coexistir na fila do admin. O admin vê todas e decide.
+
+**Na aprovação (atômica):**
+1. Verificar se já existe evento com status `Aprovado` para o mesmo `space_id` + `data_evento` com horário sobreposto → retornar `ErrSlotAlreadyBooked` se houver
+2. Se livre: aprovar a solicitação
+3. Buscar todas as demais solicitações com status `Pendente` para o mesmo `space_id` + `data_evento` com horário sobreposto → rejeitar automaticamente com `motivo_rejeicao = "Horário ocupado por outra solicitação aprovada"`
+4. Tudo em uma única transação MySQL — elimina race condition entre dois admins aprovando simultaneamente
+
+### Definição de sobreposição de horários
+Dois intervalos `[A_inicio, A_fim)` e `[B_inicio, B_fim)` se sobrepõem quando: `A_inicio < B_fim AND A_fim > B_inicio`
+
+### Mudanças no backend
+
+**Repositório de eventos** — novo método na interface `EventRequestRepository`:
+```go
+GetConflicting(ctx context.Context, spaceID uint, date, horaInicio, horaFim string, excludeID uint) ([]entities.EventRequest, error)
+```
+Query: `WHERE space_id = ? AND data_evento = ? AND hora_inicio < ? AND hora_fim > ? AND id != ? AND status IN ('Pendente', 'Aprovado')`
+
+**Use case** — novo método `ApproveEventRequest(ctx, id, adminID)`:
+- Abre transação
+- Busca a solicitação e valida ownership/permissão
+- Chama `GetConflicting` filtrando só `Aprovado` — se retornar resultados: rollback + `ErrSlotAlreadyBooked`
+- Atualiza status para `Aprovado`
+- Chama `GetConflicting` filtrando só `Pendente` — para cada um, `UpdateStatus(id, Rejeitado, motivo)`
+- Commit
+
+**Handler admin** — `ApproveEventRequest` no handler HTTP, retorna HTTP 409 para `ErrSlotAlreadyBooked` com mensagem `"Este horário já foi ocupado por outra solicitação aprovada"`.
+
+### Mudanças no Flutter / Admin Panel
+- **Admin Panel React:** ao receber HTTP 409 na aprovação, mostrar toast de erro com a mensagem do backend — nenhuma outra mudança necessária
+- **Flutter:** nenhuma mudança — o usuário recebe notificação de rejeição automática pelo fluxo FCM existente
+
+---
+
 ## Impacto e dependências
 
 | Item | Arquivo(s) | Escopo | Dependência |
@@ -274,9 +320,10 @@ Uma linha. Resolve completamente.
 | 6 | `park_detail_screen.dart` | Flutter | — |
 | 7 | `park_detail_screen.dart` | Flutter | — |
 | 8 | `app_toast.dart` | Flutter | — |
+| 9 | `event_request_repository.go` (interface + mysql), use case eventos, handler admin | Backend | — |
 
 **Ordem de implementação recomendada:**
-1. Backend primeiro (items 1 e 2) — deploy independente
+1. Backend: items 2 → 1 → 9 (CPF único → notif participantes → race condition eventos) — deploy único
 2. Flutter: item 8 (toast, 1 linha) → item 7 (safe area) → item 3 e 4 (UI responsivo) → items 5 e 6 (features visuais) → item 1 Flutter side (validação participantes)
 
 **Sem novos pacotes:** todos os itens Flutter usam o que já está no `pubspec.yaml`.
