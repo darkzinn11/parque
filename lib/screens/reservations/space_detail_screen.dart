@@ -68,30 +68,31 @@ class _SpaceDetailScreenState extends State<SpaceDetailScreen> {
   }
 
   void _showFullImage(String imgUrl) {
+    if (!mounted) return;
     showDialog<void>(
       context: context,
       barrierColor: Colors.black87,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.zero,
+      builder: (dialogCtx) => Dialog.fullscreen(
+        backgroundColor: Colors.black87,
         child: Stack(
+          fit: StackFit.expand,
           children: [
             InteractiveViewer(
               panEnabled: true,
               minScale: 0.5,
               maxScale: 4.0,
-              child: CachedNetworkImage(
-                imageUrl: imgUrl,
-                fit: BoxFit.contain,
-                width: double.infinity,
-                height: double.infinity,
+              child: Center(
+                child: CachedNetworkImage(
+                  imageUrl: imgUrl,
+                  fit: BoxFit.contain,
+                ),
               ),
             ),
             Positioned(
-              top: 40,
+              top: 48,
               right: 16,
               child: GestureDetector(
-                onTap: () => Navigator.of(context).pop(),
+                onTap: () => Navigator.of(dialogCtx).pop(),
                 child: Container(
                   width: 36,
                   height: 36,
