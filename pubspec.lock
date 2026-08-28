@@ -130,7 +130,7 @@ packages:
     source: hosted
     version: "0.3.5+2"
   crypto:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: crypto
       sha256: "1e445881f28f22d6140f181e07737b22f1e099a5e1ff94b0af2f9e4a463f4855"
@@ -169,6 +169,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.1"
+  file_picker:
+    dependency: "direct main"
+    description:
+      name: file_picker
+      sha256: ab13ae8ef5580a411c458d6207b6774a6c237d77ac37011b13994879f68a8810
+      url: "https://pub.dev"
+    source: hosted
+    version: "8.3.7"
   file_selector_linux:
     dependency: transitive
     description:
@@ -541,14 +549,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.5.4"
-  image_gallery_saver:
+  image_gallery_saver_plus:
     dependency: "direct main"
     description:
-      name: image_gallery_saver
-      sha256: "0aba74216a4d9b0561510cb968015d56b701ba1bd94aace26aacdd8ae5761816"
+      name: image_gallery_saver_plus
+      sha256: "83135406297c8fc50d76dcfee25011c97c741406a471c15671f2ecd33800f745"
       url: "https://pub.dev"
     source: hosted
-    version: "2.0.3"
+    version: "5.0.0"
   image_picker:
     dependency: "direct main"
     description:

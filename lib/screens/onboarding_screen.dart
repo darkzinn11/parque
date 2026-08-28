@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../routes/app_router.dart';
@@ -24,41 +23,40 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       "title": "Descubra os Parques",
       "subtitle":
           "Conheça os parques de São Luís e encontre o espaço ideal para você.",
-      "svg": "assets/images/onboarding1.svg",
+      "img": "assets/images/onboarding1.webp",
     },
     {
       "title": "Atividades e Eventos",
       "subtitle":
           "Fique por dentro da agenda de eventos e agende sua participação.",
-      "svg": "assets/images/onboarding2.svg",
+      "img": "assets/images/onboarding2.webp",
     },
     {
       "title": "Reserve Seu Espaço",
       "subtitle":
           "Agende quadras, áreas de lazer ou espaços para o seu grupo.",
-      "svg": "assets/images/onboarding3.svg",
+      "img": "assets/images/onboarding3.webp",
     },
     {
       "title": "Vem pro Parque!",
       "subtitle":
           "Agende quadras, áreas de lazer\nou espaços para o seu grupo.",
-      "svg": "assets/images/onboarding4.svg",
+      "img": "assets/images/onboarding4.webp",
     },
   ];
 
-  /// cache simples dos SVGs
-  late final Map<String, SvgPicture> _svgCache;
+  bool _precached = false;
 
   @override
-  void initState() {
-    super.initState();
-    _svgCache = {
-      for (final page in _pages)
-        page['svg']!: SvgPicture.asset(
-          page['svg']!,
-          fit: BoxFit.contain,
-        ),
-    };
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Pré-carrega as ilustrações uma única vez para o swipe ficar fluido.
+    if (!_precached) {
+      for (final page in _pages) {
+        precacheImage(AssetImage(page['img']!), context);
+      }
+      _precached = true;
+    }
   }
 
   Future<void> _nextPage() async {
@@ -77,11 +75,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  Widget _buildSvg(String path, double maxWidth, double maxHeight) {
+  Widget _buildImage(String path, double maxWidth, double maxHeight) {
     return SizedBox(
       width: maxWidth,
       height: maxHeight,
-      child: _svgCache[path],
+      child: Image.asset(
+        path,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
+      ),
     );
   }
 
@@ -167,8 +169,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 constraints: BoxConstraints(
                                   maxHeight: size.height * 0.35,
                                 ),
-                                child: _buildSvg(
-                                  page["svg"]!,
+                                child: _buildImage(
+                                  page["img"]!,
                                   size.width - 64,
                                   size.height * 0.35,
                                 ),
