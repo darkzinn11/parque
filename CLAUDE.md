@@ -171,8 +171,9 @@ docs/
 1. **TestFlight push notifications**: adicionar capability "Push Notifications" no Xcode → Archive → nova build TestFlight → instalar → logar → aceitar permissão
 2. **Resend**: criar conta em resend.com, verificar domínio, adicionar `RESEND_API_KEY` e `EMAIL_FROM` no `.env` do backend
 3. **PAINEL-PARK**: não está no git — arquivos salvos localmente mas sem versionamento
-4. **Deploy pendente (2026-06-18)**: rodar `deploy.sh` no PARQUE-BACK para subir todos os fixes backend (CPF único + notif participantes + race condition eventos)
-5. **Email Brevo**: migrado para SMTP — variáveis necessárias: `BREVO_SMTP_LOGIN`, `BREVO_SMTP_PASSWORD`, `EMAIL_FROM`
+4. **Email Brevo**: migrado para SMTP — variáveis necessárias: `BREVO_SMTP_LOGIN`, `BREVO_SMTP_PASSWORD`, `EMAIL_FROM`
+5. **Admin PAINEL-PARK — PDF na solicitação de evento**: `EventRequestsManagement.tsx` deve exibir link/badge do PDF quando `pdf_url` estiver preenchido na solicitação (não implementado ainda)
+6. **DDL para engenheiro (2026-06-23)**: nova coluna `pdf_url VARCHAR(512)` adicionada à tabela `event_requests` via `AutoMigrate` (sem migration manual necessária). Demais pendências DDL de baixa prioridade listadas abaixo.
 
 ## Android — padrões de segurança obrigatórios (2026-06-18)
 - **Safe area em bottom sheets**: sempre somar `MediaQuery.of(context).padding.bottom` ao padding do container + `useSafeArea: true` no `showModalBottomSheet`; `viewInsets.bottom` é só o teclado, não cobre a nav bar gestural
@@ -218,9 +219,75 @@ Todos os repositórios ficam em `internal/infrastructure/persistence/` com prefi
 
 Email Brevo: usa SMTP em vez de REST API (`smtp-relay.brevo.com:587`).
 
+## Banco de dados — convenções DDL (OBRIGATÓRIO — auditoria 2026-06-20)
+Aprendizados que evitam regressão de schema. **Toda nova entidade/coluna deve seguir:**
+1. **NUNCA deixar `string` sem tag** — GORM mapeia `string` cru para `LONGTEXT` (4 GB, não indexável, risco de storage). Sempre dimensionar: URL `gorm:"size:512"`, nome `size:150`, hora `size:5`, status/enum `size:20`, texto livre `gorm:"type:text"`.
+2. **Nome de coluna = field Go em snake_case, NÃO o json tag.** `ImagemUrl2` → coluna `imagem_url2` (sem `_` antes do dígito); `CategoriaMapA` → `categoria_map_a`. Migrations raw devem usar o nome REAL (conferir com `mysqldump --no-data`).
+3. **Charset = utf8mb4** em todas as tabelas (utf8mb4_unicode_ci). utf8mb3 não guarda emoji → `Incorrect string value` em avaliações/denúncias.
+4. **`AutoMigrate` só adiciona/altera, nunca dropa.** Limpeza = `Migrator().DropColumn`/`DROP TABLE` explícito. ALTERs de tipo e índices devem rodar **antes** do AutoMigrate (em `main.go`); coluna nova com FK exige backfill **antes** do AutoMigrate (senão valor 0 viola FK → boot fatal); dropar coluna/tabela com FK exige `DROP FOREIGN KEY` antes.
+8. **`NOT NULL`/`UNIQUE`/`FK` em coluna que JÁ existe NUNCA é aplicado pelo `AutoMigrate`** (confirmado em prod 2026-06-22). Marcar `gorm:"not null"` na struct de uma coluna existente compila e dá falsa sensação de integridade, mas o MySQL continua `DEFAULT NULL`. Exige `ALTER TABLE ... MODIFY ... NOT NULL` explícito em `main.go` (depois de garantir 0 nulls). Vale para constraint nova em coluna preexistente — não para coluna criada do zero.
+5. **Backup obrigatório antes de migration destrutiva**: `mysqldump` via ssh no VPS → `/home/wwsitw/apps/backend-park/backups/`.
+6. **`reservations` agora tem `park_id`** (FK + index, setado no `CreateReservation` a partir do espaço). As métricas de reserva por parque (dashboard gestor/admin) dependem dele.
+7. **`deploy.sh` dá falso "ERRO"** quando a migration é pesada (ex: CONVERT utf8mb4) e passa do `sleep 2` do health-check — confirmar no log (`parque.log` → "Listening and serving") e via `curl localhost:8081/api/v1/parks`.
+
+## Pendências DDL — baixa prioridade (auditoria 2026-06-22, NÃO resolvidas)
+Achados de uma 2ª auditoria do schema real de prod (`mysqldump --no-data`). **Todas baixo risco e baixo impacto — adiadas de propósito.** Dados verificados limpos no dia (0 nulls/órfãos), então aplicáveis com segurança quando formos resolver. Caminho correto: alterar struct + `ALTER` explícito em `main.go` + `deploy.sh` (não mexer no banco na mão, senão código e DB divergem).
+
+1. **`NOT NULL` que nunca aplicou** (P1) — `reservations.{user_id,space_id,data_reserva,park_id}` e `run_activities.client_id` seguem `DEFAULT NULL` em prod apesar das structs marcarem `not null`. Causa: `AutoMigrate` não altera nulabilidade de coluna existente (ver convenção DDL #8). Fix: `ALTER TABLE ... MODIFY col tipo NOT NULL` após confirmar 0 nulls. Considerar também `favorites.{user_id,park_id}` (hoje nullable, favorito sem user/park é sem sentido).
+2. **FKs ausentes** (P2) — só têm índice, sem `FOREIGN KEY`: `event_interests.{user_id,evento_id}`, `fcm_tokens.user_id`, `park_activity_types.park_id`, `park_event_rules.park_id`. 0 órfãos hoje → adicionar FK como backstop de integridade.
+3. **`spaces.latitude`/`longitude` são `varchar(30)`** (P3) — inconsistente com `parks` (`double`). String = sem validação nem cálculo geográfico. Conversão exige backfill parse string→double (só ~7 linhas).
+4. **Colunas mortas em `spaces`** (P3) — `categoria_map_a` tem **0 linhas preenchidas** → dropável. `exibir_no_mapa` (7/7 forçado `true` pelo `toSpace()`) só servia ao endpoint `/map-points` das listas "Vem caminhar/divertir" já removidas — **confirmar que `/map-points` não é mais servido pelo backend ANTES de dropar.** O catálogo vivo (`/spaces`) filtra por `categoria`/`park_id`/`permite_reserva`, nunca por `exibir_no_mapa`.
+5. **`reviews` sem `UNIQUE(user_id,park_id)`** (opcional) — "1 avaliação por parque" é garantido só no app (`_hasActiveReview`). Backstop no DB seria bom, **mas ressalva**: shadow moderation mantém avaliação rejeitada visível ao autor; constraint rígida pode travar re-avaliação futura. Avaliar antes.
+
 ---
 
 ## Histórico de mudanças
+
+### 2026-06-23 (run_tracker cross-device + UX fixes + PDF em eventos — deployado)
+
+**Flutter:**
+- **Cross-device restore** (`run_tracker_service.dart` + `main.dart`): `pullFromCloud()` exposto como método público; auth listener em `main.dart` agora chama tanto `syncPending()` (local→nuvem) quanto `pullFromCloud()` (nuvem→local) ao logar — restaura histórico de atividades em troca de dispositivo
+- **`atividade_screen.dart`** — 3 correções:
+  - "Ver tudo da semana" redesenhado: `DraggableScrollableSheet` com stats agregados + lista scrollável de atividades individuais (antes mostrava só totais); cada card abre `ActivityDetailModal`
+  - Bug pós-corrida: modal puxava atividade anterior quando percurso curto não era salvo — corrigido com guard `prevCount` (`run.activities.length > prevCount` antes de mostrar)
+  - "Histórico Recente" → "Histórico"; cap de 20 itens removido
+- **`home_screen.dart`**: saudação "Oi, **Nilo!**" — pega `me['nome']` (chave em PT-BR), normaliza com `toLowerCase()` + capitaliza primeira letra; sem trailing "Boa noite" (gramaticalmente incorreto)
+- **`user_screen.dart`**: exibe apenas primeiro + último nome, cada um capitalizado (ex: "NILO DI ARMANNI SILVA DE SOUSA" → "Nilo Sousa")
+- **`park_detail_screen.dart`**: singular/plural correto — `'$n ${n == 1 ? 'avaliação' : 'avaliações'}'`
+- **`event_details_screen.dart`** — PDF opcional em solicitações de evento:
+  - Card "Documento PDF" com `file_picker ^8.1.2`; `withData: true` para compatibilidade iOS; `behavior: HitTestBehavior.opaque` + `try/catch` para garantir abertura do picker
+  - `_uploadPdf()`: usa `bytes` da memória (withData) com fallback para `path`; POST em `/upload` com `entity_type=event_request`
+  - `pdfUrl` incluído no body do `_submit()` quando preenchido
+  - Ordem dos campos: PDF antes do switch BPA
+- **`data/models/event_request.dart`**: campo `pdfUrl` adicionado com default `''`
+
+**Backend (PARQUE-BACK) — deployado:**
+- **`event_request.go`**: `PdfUrl string json:"pdf_url" gorm:"size:512"` — AutoMigrate adiciona coluna `pdf_url VARCHAR(512)` automaticamente
+- **`event_request_usecase.go`**: `PdfUrl` em `CreateEventInput` e `UpdateAndResubmitInput`
+- **`event_request_handler.go`**: `pdf_url` em `createEventRequestInput` e `updateAndResubmitInput`
+- **`media_validate.go`**: PDF adicionado ao allowlist (`.pdf → application/pdf`); `MaxPdfUploadBytes = 5 << 20` (5 MB)
+
+**DDL novo em produção:**
+- `event_requests.pdf_url VARCHAR(512) NULL` — adicionado via AutoMigrate no deploy deste dia
+
+### 2026-06-20 (auditoria DDL completa + limpeza de schema morto — deployado)
+
+**Backend (PARQUE-BACK) — migration em `main.go`, deployada em produção:**
+- **Charset**: todas as 18 tabelas `utf8mb3 → utf8mb4` (emoji em avaliações/denúncias agora funciona; fim do deprecated)
+- **longtext → varchar/text dimensionado**: `parks`, `spaces`, `reviews`, `reservations`, `space_rules`, `eventos`; `reviews.status varchar(20)` **+ índice**; `run_activities.route → mediumtext`
+- **`reservations.park_id`** adicionado + backfill via `spaces.park_id` + FK + index — **corrigiu dashboards do gestor/admin que estavam zerados** (queries filtravam `park_id` numa coluna inexistente, erro engolido)
+- **`aceitou_termos`** agora é persistido em cadastro e denúncia (era gap de LGPD — app enviava, backend descartava): ligado em `User`, `Denuncia`, handlers e usecases
+- **Integridade**: `UNIQUE(user_id,park_id)` em `favorites`; `parks.deleted_at → gorm.DeletedAt` (soft-delete real). ⚠️ **CORREÇÃO (auditoria 2026-06-22):** o `NOT NULL` que se pretendia aplicar em `reservations.{user_id,space_id,data_reserva,park_id}` e `run_activities.client_id` **NÃO foi aplicado** — o `AutoMigrate` ignora `NOT NULL` em coluna existente (ver pendência DDL abaixo). As structs marcam, mas em prod seguem `DEFAULT NULL`.
+- **Schema morto removido**: tabelas `map_points`/`activities`/`vem_caminhars`; colunas `parks.imagem_url2/3`, `favorites.activity_id`, `denuncia.{cep,rua,numero,complemento,bairro}`; entidades Go `Activity`/`MapPoint`/`VemCaminhar` + repos órfãos
+- Decisão: `eventos.data_inicio/fim` mantido como `varchar(30)` (não migrado p/ `DATE` — exigiria mexer no fluxo editorial)
+
+**Flutter:**
+- `Park` passou a ler/exibir `endereco`/`cidade` (home + detalhe); removido hack `description.contains('Rua')`
+- Removido subsistema morto "Vem se divertir/Vem caminhar": listas da home + `map_point_repository.dart` + `map_point.dart` + `spaces_service.dart`
+- `home_screen`: 5 atalhos reordenados → Colabore · Reservas · Eventos · Favoritos · Info
+
+**Admin (PAINEL-PARK):**
+- `ParkFormPage`: 3 fotos → 1 (só capa); `AdminDashboard` usa dados reais por período (não mock); mock removido de `api.ts`/`AdminLayout`/`ReviewsManagement`
 
 ### 2026-06-08 (fix: diagnóstico completo — BACK-01/04/07/08/11/12 + FLUTTER-01/02)
 
