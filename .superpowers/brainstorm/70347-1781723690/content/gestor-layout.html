@@ -1,0 +1,135 @@
+<style>
+  .dash-wrap { font-family: 'Inter', sans-serif; display: flex; flex-direction: column; gap: 10px; padding: 10px; background: #f3f4f6; border-radius: 10px; }
+  .dash-topbar { background: #1a1a2e; color: white; padding: 8px 14px; border-radius: 8px; font-size: 11px; display: flex; align-items: center; gap: 8px; }
+  .dash-topbar strong { color: #a3e635; font-size: 12px; }
+  .alert-row { display: grid; gap: 8px; }
+  .alert-card { border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
+  .alert-card .num { font-size: 24px; font-weight: 800; line-height: 1; }
+  .alert-card .lbl { font-size: 10px; opacity: 0.8; margin-top: 2px; }
+  .alert-card .badge { margin-left: auto; background: rgba(255,255,255,0.25); border-radius: 20px; padding: 2px 8px; font-size: 10px; font-weight: 700; }
+  .c-orange { background: #ea580c; color: white; }
+  .c-yellow { background: #ca8a04; color: white; }
+  .c-red { background: #dc2626; color: white; }
+  .c-purple { background: #7c3aed; color: white; }
+  .c-green { background: #669340; color: white; }
+  .metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .metric-card { background: white; border-radius: 8px; padding: 10px 12px; text-align: center; }
+  .metric-card .num { font-size: 20px; font-weight: 700; color: #1a1a2e; }
+  .metric-card .lbl { font-size: 10px; color: #6b7280; margin-top: 2px; }
+  .chart-placeholder { background: white; border-radius: 8px; padding: 12px; height: 80px; display: flex; align-items: flex-end; gap: 4px; }
+  .bar { background: #669340; border-radius: 3px 3px 0 0; flex: 1; opacity: 0.85; }
+  .section-title { font-size: 10px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .list-row { background: white; border-radius: 8px; }
+  .list-item { padding: 8px 12px; font-size: 11px; border-bottom: 1px solid #f3f4f6; display: flex; justify-content: space-between; align-items: center; }
+  .list-item:last-child { border-bottom: none; }
+  .pill { border-radius: 20px; padding: 2px 8px; font-size: 10px; font-weight: 600; }
+  .pill-orange { background: #fff7ed; color: #ea580c; }
+  .pill-green { background: #f0fdf4; color: #16a34a; }
+  .pill-yellow { background: #fefce8; color: #ca8a04; }
+  .side-layout { display: grid; grid-template-columns: 1fr 180px; gap: 8px; }
+  .tab-bar { display: flex; gap: 0; background: white; border-radius: 8px; overflow: hidden; }
+  .tab { flex: 1; padding: 8px; text-align: center; font-size: 11px; font-weight: 600; color: #6b7280; cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab.active { color: #669340; border-bottom: 2px solid #669340; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stars { color: #f59e0b; font-size: 11px; }
+</style>
+
+<h2>Dashboard do Gestor — qual layout faz mais sentido?</h2>
+<p class="subtitle">O gestor gerencia 1 parque. Foco: pendências que precisam de ação + métricas do parque.</p>
+
+<div class="options">
+
+  <!-- OPÇÃO A -->
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Fila de ações no topo — tudo o que precisa de atenção primeiro</h3>
+      <p>Cards de alerta coloridos no topo, métricas secundárias abaixo, gráfico e lista no fim</p>
+      <div class="dash-wrap" style="margin-top:10px">
+        <div class="dash-topbar">🌳 <strong>Parque do Rangedor</strong> <span style="opacity:0.5">· gestor</span></div>
+        <div class="section-title">⚡ Ação necessária</div>
+        <div class="alert-row" style="grid-template-columns:1fr 1fr">
+          <div class="alert-card c-orange"><div><div class="num">5</div><div class="lbl">Reservas pendentes</div></div><div class="badge">VER</div></div>
+          <div class="alert-card c-yellow"><div><div class="num">2</div><div class="lbl">Eventos p/ revisar</div></div><div class="badge">VER</div></div>
+          <div class="alert-card c-red"><div><div class="num">1</div><div class="lbl">Denúncia nova</div></div><div class="badge">VER</div></div>
+          <div class="alert-card c-purple"><div><div class="num">3</div><div class="lbl">Avaliações p/ moderar</div></div><div class="badge">VER</div></div>
+        </div>
+        <div class="section-title">📊 Este mês</div>
+        <div class="metric-row">
+          <div class="metric-card"><div class="num">28</div><div class="lbl">Reservas</div></div>
+          <div class="metric-card"><div class="num" style="color:#669340">4.2</div><div class="lbl">Satisfação</div></div>
+          <div class="metric-card"><div class="num">340</div><div class="lbl">Visitantes</div></div>
+        </div>
+        <div class="section-title">📈 Reservas por dia</div>
+        <div class="chart-placeholder">
+          <div class="bar" style="height:40%"></div><div class="bar" style="height:65%"></div><div class="bar" style="height:55%"></div><div class="bar" style="height:80%"></div><div class="bar" style="height:45%"></div><div class="bar" style="height:90%"></div><div class="bar" style="height:60%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPÇÃO B -->
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Layout em duas colunas — pendências à direita, dados à esquerda</h3>
+      <p>Gráficos e métricas à esquerda (maior), painel de ações à direita como coluna lateral</p>
+      <div class="dash-wrap" style="margin-top:10px">
+        <div class="dash-topbar">🌳 <strong>Parque do Rangedor</strong> <span style="opacity:0.5">· gestor</span></div>
+        <div class="side-layout">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="metric-row">
+              <div class="metric-card"><div class="num">28</div><div class="lbl">Reservas/mês</div></div>
+              <div class="metric-card"><div class="num" style="color:#669340">4.2</div><div class="lbl">Satisfação</div></div>
+              <div class="metric-card"><div class="num">340</div><div class="lbl">Visitantes</div></div>
+            </div>
+            <div class="section-title">📈 Reservas por dia</div>
+            <div class="chart-placeholder">
+              <div class="bar" style="height:40%"></div><div class="bar" style="height:65%"></div><div class="bar" style="height:55%"></div><div class="bar" style="height:80%"></div><div class="bar" style="height:45%"></div><div class="bar" style="height:90%"></div>
+            </div>
+            <div class="list-row">
+              <div class="list-item"><span>Ana Silva — Quadra A</span><span class="pill pill-green">Aprovada</span></div>
+              <div class="list-item"><span>João Costa — Campo B</span><span class="pill pill-orange">Pendente</span></div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div class="section-title">⚡ Pendências</div>
+            <div class="alert-card c-orange" style="flex-direction:column;align-items:flex-start;gap:2px"><div class="num">5</div><div class="lbl">Reservas pendentes</div></div>
+            <div class="alert-card c-yellow" style="flex-direction:column;align-items:flex-start;gap:2px"><div class="num">2</div><div class="lbl">Eventos</div></div>
+            <div class="alert-card c-red" style="flex-direction:column;align-items:flex-start;gap:2px"><div class="num">1</div><div class="lbl">Denúncia</div></div>
+            <div class="alert-card c-purple" style="flex-direction:column;align-items:flex-start;gap:2px"><div class="num">3</div><div class="lbl">Avaliações</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPÇÃO C -->
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Abas — Pendências | Métricas | Avaliações</h3>
+      <p>Dashboard dividido por abas. Abre sempre na aba Pendências, com badge de contagem</p>
+      <div class="dash-wrap" style="margin-top:10px">
+        <div class="dash-topbar">🌳 <strong>Parque do Rangedor</strong> <span style="opacity:0.5">· gestor</span></div>
+        <div class="tab-bar">
+          <div class="tab active">⚡ Pendências <span style="background:#ea580c;color:white;border-radius:10px;padding:0 5px;font-size:9px;margin-left:3px">11</span></div>
+          <div class="tab">📊 Métricas</div>
+          <div class="tab">⭐ Avaliações</div>
+        </div>
+        <div class="alert-row" style="grid-template-columns:1fr 1fr">
+          <div class="alert-card c-orange"><div><div class="num">5</div><div class="lbl">Reservas pendentes</div></div><div class="badge">VER</div></div>
+          <div class="alert-card c-yellow"><div><div class="num">2</div><div class="lbl">Eventos p/ revisar</div></div><div class="badge">VER</div></div>
+          <div class="alert-card c-red"><div><div class="num">1</div><div class="lbl">Denúncia nova</div></div><div class="badge">VER</div></div>
+          <div class="alert-card c-purple"><div><div class="num">3</div><div class="lbl">Avaliações</div></div><div class="badge">VER</div></div>
+        </div>
+        <div class="list-row">
+          <div class="list-item"><span>🕐 João Costa — Campo B — <strong>hoje 14h</strong></span><span class="pill pill-orange">Aprovar</span></div>
+          <div class="list-item"><span>🕐 Ana Silva — Quadra A — <strong>amanhã 9h</strong></span><span class="pill pill-orange">Aprovar</span></div>
+          <div class="list-item"><span>📋 Corrida beneficente — 20 pessoas</span><span class="pill pill-yellow">Evento</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
