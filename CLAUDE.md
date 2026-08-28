@@ -170,7 +170,7 @@ docs/
 ## Pendências que dependem de ação humana
 1. **TestFlight push notifications**: adicionar capability "Push Notifications" no Xcode → Archive → nova build TestFlight → instalar → logar → aceitar permissão
 2. **Resend**: criar conta em resend.com, verificar domínio, adicionar `RESEND_API_KEY` e `EMAIL_FROM` no `.env` do backend
-3. **PAINEL-PARK**: não está no git — arquivos salvos localmente mas sem versionamento
+3. ~~**PAINEL-PARK**: não está no git~~ — resolvido em 2026-08-28: repo criado, primeiro commit, push para `darkzinn11/PAINEL-PARK` (privado)
 4. **Email Brevo**: migrado para SMTP — variáveis necessárias: `BREVO_SMTP_LOGIN`, `BREVO_SMTP_PASSWORD`, `EMAIL_FROM`
 5. **Admin PAINEL-PARK — PDF na solicitação de evento**: `EventRequestsManagement.tsx` deve exibir link/badge do PDF quando `pdf_url` estiver preenchido na solicitação (não implementado ainda)
 6. **DDL para engenheiro (2026-06-23)**: nova coluna `pdf_url VARCHAR(512)` adicionada à tabela `event_requests` via `AutoMigrate` (sem migration manual necessária). Demais pendências DDL de baixa prioridade listadas abaixo.
@@ -242,6 +242,60 @@ Achados de uma 2ª auditoria do schema real de prod (`mysqldump --no-data`). **T
 ---
 
 ## Histórico de mudanças
+
+### 2026-08-28 (retomada após 2 meses parado — backup completo dos 3 repos, NADA deployado)
+
+Sessão de retomada do projeto. Diagnóstico inicial: havia ~2 meses de trabalho terminado
+(implementado, documentado neste CLAUDE.md, `flutter analyze`/`go build` limpos) que **nunca
+tinha sido commitado nem enviado ao GitHub** em nenhum dos 3 repos. Risco de perda total se a
+máquina falhasse. Ação: revisar cada diff, organizar em commits temáticos, dar push. Nenhum
+código foi alterado nesta sessão além de organização/commit — só o `.gitignore` de cada repo
+ganhou entradas novas (ver abaixo).
+
+**PARQUE (Flutter)** — branch `feat/reservations-redesign`, agora sincronizada com o origin:
+- 7 commits novos cobrindo trabalho que já estava pronto no working tree: rename do bundle
+  Android `com.vemproparque` → `com.vemproparquema` (MainActivity movida, `google-services.json`
+  adicionado, `GoogleService-Info.plist` mal colocado em `android/app/` removido), onboarding
+  SVG→WEBP, PDF opcional em eventos (`file_picker`), `lib/core/checksum.dart` (SHA-256 client-side
+  — ver Task 10 abaixo), cross-device run tracker (`pullFromCloud()` no login), remoção de código
+  morto (`map_point.dart`, `spaces_service.dart`), fix `myLocationEnabled` no Android
+- `.gitignore`: `android/build/` (artefato de build do Gradle estava sendo versionado por engano)
+  e `*.code-workspace` (arquivo de workspace multi-root local, não é do projeto)
+- `main` também tinha 4 commits não enviados — pushed junto
+
+**PARQUE-BACK (Go)** — situação mais grave: estava em outro branch (`feat/media-content-addressed`,
+não `reservations-redesign`), com **3 branches de feature e o main sem upstream nenhum** (zero
+backup remoto). Todos os 4 branches foram pushed. 2 commits novos:
+- `event_requests.pdf_url` (espelha o campo do Flutter) + `users.cpf NOT NULL` (resolve a pendência
+  DDL P1 documentada abaixo) + limite de upload separado para PDF (5MB)
+- **⚠️ ATENÇÃO antes do próximo deploy**: o commit de `cmd/api/main.go` roda
+  `DELETE FROM users WHERE cpf IS NULL OR cpf = ''` antes do `ALTER TABLE ... NOT NULL`. Isso é
+  destrutivo e não foi testado contra o banco de produção nesta sessão — **conferir a contagem de
+  linhas afetadas em prod antes de rodar o deploy**, não depois.
+- `.gitignore`: binários compilados soltos na raiz (`api`, `migrate-media`, `cleanup-media`) —
+  regra que já estava documentada no `CLAUDE.md` do próprio backend mas não estava no `.gitignore`
+- **Content-addressed storage (branch `feat/media-content-addressed`)**: o `CLAUDE.md` do backend
+  (escrito em 2026-06-22) listava como pendente "Task 10 — Flutter e Painel calcularem checksum".
+  Nesta sessão descobri que **as duas pontas já têm o código**: `lib/core/checksum.dart` no Flutter
+  (usado em 4 telas) e `src/lib/checksum.ts` no Painel. Ou seja, as 3 partes parecem prontas, mas
+  **isso nunca foi verificado nem deployado de forma coordenada** — o próprio CLAUDE.md do backend
+  avisa que backend e clientes precisam subir juntos, senão uploads são rejeitados com 400.
+  Antes de deployar: reler `docs/superpowers/specs/2026-06-22-media-content-addressed-storage-design.md`
+  no PARQUE-BACK e confirmar que o fluxo cliente→checksum→backend funciona ponta a ponta em staging.
+
+**PAINEL-PARK (React admin)** — não tinha git NENHUM até hoje (pendência conhecida desde
+2026-06-08). Rodei `git init`, criado `.gitignore` (cobria node_modules/dist/.env mas faltavam
+`scratch/`, `test_iconsax.mjs` e `*.code-workspace` — scripts/artefatos de trabalho, adicionados),
+commit inicial com os 104 arquivos do projeto, criado repositório privado no GitHub
+(`darkzinn11/PAINEL-PARK`) e pushed. **Observação não bloqueante**: o projeto versiona 4 arquivos
+`.ttf` da fonte "Segoe UI" (`src/assets/fonts/`) — é fonte proprietária da Microsoft, sem licença
+de redistribuição livre; avaliar trocar por uma fonte com licença aberta se isso for para um
+repositório que saia do controle da prefeitura.
+
+**Estado ao final da sessão**: os 3 repos têm working tree limpo e backup remoto completo. Nada
+foi deployado, nenhuma migration rodou contra produção. Próximo passo natural é decidir a ordem
+de entrega: (1) o que falta pra fechar `feat/reservations-redesign` e dar merge em ambos os repos,
+e (2) se/quando fechar o ciclo de content-addressed storage (backend + Flutter + Painel juntos).
 
 ### 2026-06-23 (run_tracker cross-device + UX fixes + PDF em eventos — deployado)
 
