@@ -58,3 +58,4 @@ back/node_modules/
 /android/app/release
 
 android/build/
+*.code-workspace
