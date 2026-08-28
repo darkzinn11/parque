@@ -1,5 +1,7 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/formatters.dart';
 import '../../services/auth_service.dart';
@@ -249,6 +251,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       numero: _numero.text.trim(),
       complemento: _complemento.text.trim(),
       bairro: _bairro.text.trim(),
+      aceitouTermos: _accept,
     );
 
     if (!mounted) return;
@@ -529,21 +532,75 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 20),
 
                 // ── Termos ─────────────────────────────────────────────────
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _accept,
-                      onChanged: (v) => setState(() => _accept = v ?? false),
-                      activeColor: kGreen,
+                GestureDetector(
+                  onTap: () => setState(() => _accept = !_accept),
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: kGreen, width: 2),
+                            color: _accept ? kGreen : Colors.transparent,
+                          ),
+                          child: _accept
+                              ? const Icon(Icons.check, color: Colors.white, size: 14)
+                              : null,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                const TextSpan(text: 'Li e aceito os '),
+                                TextSpan(
+                                  text: 'Termos de Uso',
+                                  recognizer: TapGestureRecognizer()
+                                    ..onTap = () => showModalBottomSheet(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          backgroundColor: Colors.transparent,
+                                          builder: (_) => const _TermosAppSheet(),
+                                        ),
+                                  style: const TextStyle(
+                                    color: kGreen,
+                                    fontWeight: FontWeight.w600,
+                                    decoration: TextDecoration.underline,
+                                    decorationColor: kGreen,
+                                  ),
+                                ),
+                                const TextSpan(text: ' e a '),
+                                TextSpan(
+                                  text: 'Política de Privacidade',
+                                  recognizer: TapGestureRecognizer()
+                                    ..onTap = () => showModalBottomSheet(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          backgroundColor: Colors.transparent,
+                                          builder: (_) => const _TermosAppSheet(),
+                                        ),
+                                  style: const TextStyle(
+                                    color: kGreen,
+                                    fontWeight: FontWeight.w600,
+                                    decoration: TextDecoration.underline,
+                                    decorationColor: kGreen,
+                                  ),
+                                ),
+                                const TextSpan(text: '.'),
+                              ],
+                              style: TextStyle(color: kDark, fontSize: 14, height: 1.4),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 4),
-                    const Expanded(
-                      child: Text(
-                        'Li e aceito os Termos de Uso e a Política de Privacidade.',
-                        style: TextStyle(color: kDark, fontSize: 14),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
 
                 const SizedBox(height: 24),
@@ -622,4 +679,135 @@ class _LoginLink extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Termos de Uso e Política de Privacidade ─────────────────────────────────
+
+class _TermosAppSheet extends StatelessWidget {
+  const _TermosAppSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, controller) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFFDDE3D5),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  const Icon(Icons.article_outlined, color: kGreen, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Termos de Uso e Privacidade',
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: kDark,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: kHint),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: controller,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _secao('1. O aplicativo',
+                        '"Vem pro Parque" é um app para explorar, reservar espaços e participar de eventos nos parques públicos.'),
+                    _secao('2. Sua conta',
+                        'Você é responsável pelas informações que cadastra. Nome, e-mail, CPF e telefone devem ser verídicos. Não compartilhe sua senha com outras pessoas.'),
+                    _secao('3. O que fazemos com seus dados',
+                        'Seus dados são usados para autenticação, reservas, eventos e colaborações. Não repassamos nada a terceiros sem necessidade legal.'),
+                    _secao('4. LGPD',
+                        'Tratamos seus dados conforme a Lei Geral de Proteção de Dados (Lei nº 13.709/2018). Você pode solicitar acesso, correção ou exclusão dos seus dados a qualquer momento pelo suporte do app.'),
+                    _secao('5. Reservas e eventos',
+                        'Estão sujeitos à aprovação pelo gestor do parque. A SEMA-MA pode cancelar reservas em casos de emergência ou manutenção, com aviso ao usuário.'),
+                    _secao('6. Conta inativa',
+                        'Contas sem acesso por mais de 2 anos podem ser encerradas. Seus dados serão removidos conforme a LGPD.'),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ao criar sua conta, você confirma que leu e aceita estes termos.',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: kHint,
+                        fontStyle: FontStyle.italic,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: kGreen,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(26),
+                          ),
+                        ),
+                        child: Text(
+                          'Entendido',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _secao(String titulo, String texto) => Padding(
+        padding: const EdgeInsets.only(bottom: 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(titulo,
+                style: GoogleFonts.poppins(
+                    fontSize: 14, fontWeight: FontWeight.w700, color: kDark)),
+            const SizedBox(height: 6),
+            Text(texto,
+                style: GoogleFonts.poppins(
+                    fontSize: 13, color: kHint, height: 1.6)),
+          ],
+        ),
+      );
 }

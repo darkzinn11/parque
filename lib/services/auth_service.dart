@@ -20,7 +20,17 @@ class AuthService extends ChangeNotifier {
   // INIT
   // ======================================================
   Future<void> init() async {
-    _tokenCache = await _storage.read(key: _tokenKey);
+    try {
+      _tokenCache = await _storage.read(key: _tokenKey);
+    } catch (e) {
+      // Android Keystore pode lançar (BadPaddingException/KeyStoreException)
+      // após reinstalação/restore. Não pode derrubar o boot do app.
+      if (kDebugMode) print('⚠️ Falha ao ler token do secure storage: $e');
+      _tokenCache = null;
+      try {
+        await _storage.delete(key: _tokenKey);
+      } catch (_) {}
+    }
     if (_tokenCache != null) {
       await refreshUser();
     }
@@ -144,12 +154,14 @@ class AuthService extends ChangeNotifier {
     String? numero,
     String? complemento,
     String? bairro,
+    bool aceitouTermos = false,
   }) async {
     try {
       final res = await _api.post('/register', body: {
         'nome': username,
         'email': email,
         'senha': password,
+        'aceitou_termos': aceitouTermos,
         if (phone != null && phone.isNotEmpty) 'telefone': phone,
         if (cpf != null && cpf.isNotEmpty) 'cpf': cpf,
         if (cidade != null && cidade.isNotEmpty) 'cidade': cidade,

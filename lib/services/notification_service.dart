@@ -76,14 +76,16 @@ class NotificationService {
         options: DefaultFirebaseOptions.currentPlatform,
       );
 
+      // Registra o handler de background ANTES de qualquer outro await — no
+      // Android o plugin precisa do entry-point cedo para o isolate de background.
+      FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+
       final messaging = FirebaseMessaging.instance;
 
       await messaging.requestPermission(alert: true, badge: true, sound: true);
 
       // Inscreve no tópico de anúncios — recebe broadcasts de eventos do parque.
       await messaging.subscribeToTopic('parque-todos');
-
-      FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
 
       // App em foreground: salva no inbox e mostra toast.
       FirebaseMessaging.onMessage.listen(_handleForegroundMessage);

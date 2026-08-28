@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../data/models/space.dart';
 import '../../data/repositories/space_repository.dart';
@@ -75,7 +76,7 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
     final spaces = await _repo.fetchSpaces(parkId: widget.parkId);
     if (mounted) {
       setState(() {
-        _spaces = spaces;
+        _spaces = spaces.where((s) => s.permiteEvento).toList();
         _isLoadingSpaces = false;
       });
     }
@@ -224,6 +225,7 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
                 ),
                 const SizedBox(height: 12),
                 _buildSpacesSection(),
+                _buildSectorPreview(),
 
                 const SizedBox(height: 24),
 
@@ -417,9 +419,106 @@ class _EventRequestScreenState extends State<EventRequestScreen> {
       }).toList(),
     );
   }
+
+  // Preview do mapa: contorno do(s) setor(es) selecionado(s) que têm polígono.
+  Widget _buildSectorPreview() {
+    final withPolygon = _spaces
+        .where((s) => _selectedSpaceIds.contains(s.id) && s.areaPolygon != null)
+        .toList();
+    if (withPolygon.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: _SectorMapPreview(spaces: withPolygon),
+    );
+  }
 }
 
 // ─── Sub-widgets ──────────────────────────────────────────────────────────
+
+/// Mini-mapa que traça o contorno (polígono) dos setores selecionados.
+class _SectorMapPreview extends StatefulWidget {
+  const _SectorMapPreview({required this.spaces});
+  final List<Space> spaces; // só os que têm areaPolygon != null
+
+  @override
+  State<_SectorMapPreview> createState() => _SectorMapPreviewState();
+}
+
+class _SectorMapPreviewState extends State<_SectorMapPreview> {
+  GoogleMapController? _controller;
+
+  Iterable<List<double>> get _allPoints =>
+      widget.spaces.expand((s) => s.areaPolygon ?? const <List<double>>[]);
+
+  Set<Polygon> _polygons() {
+    return widget.spaces
+        .where((s) => s.areaPolygon != null)
+        .map((s) => Polygon(
+              polygonId: PolygonId('space_${s.id}'),
+              points: s.areaPolygon!.map((p) => LatLng(p[0], p[1])).toList(),
+              strokeColor: _green,
+              strokeWidth: 3,
+              fillColor: _green.withValues(alpha: 0.18),
+            ))
+        .toSet();
+  }
+
+  LatLngBounds _bounds() {
+    double? minLat, maxLat, minLng, maxLng;
+    for (final p in _allPoints) {
+      minLat = (minLat == null || p[0] < minLat) ? p[0] : minLat;
+      maxLat = (maxLat == null || p[0] > maxLat) ? p[0] : maxLat;
+      minLng = (minLng == null || p[1] < minLng) ? p[1] : minLng;
+      maxLng = (maxLng == null || p[1] > maxLng) ? p[1] : maxLng;
+    }
+    return LatLngBounds(
+      southwest: LatLng(minLat ?? 0, minLng ?? 0),
+      northeast: LatLng(maxLat ?? 0, maxLng ?? 0),
+    );
+  }
+
+  void _fit() {
+    final c = _controller;
+    if (c == null || _allPoints.isEmpty) return;
+    // post-frame: evita exceção de bounds antes do layout do mapa.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      c.animateCamera(CameraUpdate.newLatLngBounds(_bounds(), 36));
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _SectorMapPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _fit(); // re-ajusta a câmera quando a seleção muda
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = _bounds();
+    final center = LatLng(
+      (b.southwest.latitude + b.northeast.latitude) / 2,
+      (b.southwest.longitude + b.northeast.longitude) / 2,
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: SizedBox(
+        height: 200,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: center, zoom: 16),
+          polygons: _polygons(),
+          zoomControlsEnabled: false,
+          myLocationButtonEnabled: false,
+          compassEnabled: false,
+          mapToolbarEnabled: false,
+          onMapCreated: (c) {
+            _controller = c;
+            _fit();
+          },
+        ),
+      ),
+    );
+  }
+}
 
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel({super.key, required this.label, this.hasError = false});

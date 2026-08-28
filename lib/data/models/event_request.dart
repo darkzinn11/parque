@@ -19,6 +19,7 @@ class EventRequest {
   final String motivoRejeicao;
   final String motivoCancelamento;
   final String createdAt;
+  final String pdfUrl;
 
   const EventRequest({
     required this.id,
@@ -39,6 +40,7 @@ class EventRequest {
     required this.motivoRejeicao,
     required this.motivoCancelamento,
     required this.createdAt,
+    this.pdfUrl = '',
   });
 
   factory EventRequest.fromJson(Map<String, dynamic> json) {
@@ -63,6 +65,7 @@ class EventRequest {
       motivoRejeicao: (json['motivo_rejeicao'] ?? '').toString(),
       motivoCancelamento: (json['motivo_cancelamento'] ?? '').toString(),
       createdAt: (json['created_at'] ?? '').toString(),
+      pdfUrl: (json['pdf_url'] ?? '').toString(),
     );
   }
 }

@@ -14,6 +14,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../core/api/api_client.dart';
 import '../core/api/api_config.dart';
+import '../core/checksum.dart';
 import '../core/formatters.dart';
 import '../data/models/park.dart';
 import '../data/repositories/go_park_repository.dart';
@@ -67,6 +68,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
   // Termos
   bool _concordoTermos = false;
   bool _informacoesVerdadeiras = false;
+  bool _confirmacaoError = false;
 
   bool _enviando = false;
   bool _success = false;
@@ -224,16 +226,24 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
 
   Future<String?> _uploadFoto(XFile foto) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/denuncias/upload');
+    final bytes = await foto.readAsBytes();
     final req = http.MultipartRequest('POST', uri)
-      ..files.add(await http.MultipartFile.fromPath('file', foto.path));
+      ..fields['entity_type'] = 'denuncia'
+      ..fields['checksum'] = sha256Hex(bytes)
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: foto.name));
+    // Quando o parque já foi escolhido, o backend organiza em parques/{id}/denuncias.
+    if (_selectedParkId != null) {
+      req.fields['park_id'] = _selectedParkId.toString();
+    }
     final streamed = await req.send();
     if (streamed.statusCode != 200) return null;
     final body = await streamed.stream.bytesToString();
     final data = jsonDecode(body) as Map<String, dynamic>;
     final relUrl = data['url']?.toString();
     if (relUrl == null) return null;
-    // relUrl is like /api/v1/uploads/filename.jpg
-    return '${ApiConfig.baseUrl.replaceFirst('/api/v1', '')}$relUrl';
+    // Guarda o caminho RELATIVO (ex.: /uploads/parques/5/denuncias/x.jpg);
+    // quem exibe (painel admin) prefixa a base.
+    return relUrl;
   }
 
   // ── Submit ───────────────────────────────────────────────────────────────────
@@ -261,6 +271,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     }
 
     if (!_concordoTermos || !_informacoesVerdadeiras) {
+      setState(() => _confirmacaoError = true);
       AppToast.show(
         context,
         'Aceite os termos e confirme a veracidade das informações.',
@@ -977,7 +988,11 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                     _buildCheckbox(
                       text: 'Afirmo que as informações aqui prestadas são verdadeiras.',
                       value: _informacoesVerdadeiras,
-                      onChanged: (v) => setState(() => _informacoesVerdadeiras = v),
+                      hasError: _confirmacaoError && !_informacoesVerdadeiras,
+                      onChanged: (v) => setState(() {
+                        _informacoesVerdadeiras = v;
+                        if (_concordoTermos && _informacoesVerdadeiras) _confirmacaoError = false;
+                      }),
                     ),
                   ],
                 ),
@@ -1156,8 +1171,12 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
 
   Widget _buildTermosCheckbox() {
     final recognizer = TapGestureRecognizer()..onTap = _mostrarTermos;
+    final hasError = _confirmacaoError && !_concordoTermos;
     return GestureDetector(
-      onTap: () => setState(() => _concordoTermos = !_concordoTermos),
+      onTap: () => setState(() {
+        _concordoTermos = !_concordoTermos;
+        if (_concordoTermos && _informacoesVerdadeiras) _confirmacaoError = false;
+      }),
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1170,7 +1189,10 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
               height: 22,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: kBrandGreen, width: 2),
+                border: Border.all(
+                  color: hasError ? Colors.red : kBrandGreen,
+                  width: 2,
+                ),
                 color: _concordoTermos ? kBrandGreen : Colors.transparent,
               ),
               child: _concordoTermos
@@ -1226,6 +1248,7 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
     required String text,
     required bool value,
     required ValueChanged<bool> onChanged,
+    bool hasError = false,
   }) =>
       GestureDetector(
         onTap: () => onChanged(!value),
@@ -1241,7 +1264,10 @@ class _DenuncieScreenState extends State<DenuncieScreen> {
                 height: 22,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: kBrandGreen, width: 2),
+                  border: Border.all(
+                    color: hasError ? Colors.red : kBrandGreen,
+                    width: 2,
+                  ),
                   color: value ? kBrandGreen : Colors.transparent,
                 ),
                 child: value

@@ -140,6 +140,9 @@ class RunService extends ChangeNotifier {
   /// (o listener de auth no main.dart chama syncPending a cada notificação).
   bool _syncing = false;
 
+  /// Puxa atividades da nuvem e mescla — restaura histórico em troca de dispositivo.
+  Future<void> pullFromCloud() => _mergeFromCloud();
+
   /// Sincroniza todas as atividades pendentes (sem serverId) para a nuvem.
   Future<void> syncPending() async {
     if (AuthService.instance.tokenSync == null) return;

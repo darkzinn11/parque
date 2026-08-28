@@ -12,6 +12,8 @@ class Park {
   final String? heroImage;
   final double? latitude;
   final double? longitude;
+  final String? endereco;
+  final String? cidade;
 
   Park({
     required this.id,
@@ -23,6 +25,8 @@ class Park {
     this.heroImage,
     this.latitude,
     this.longitude,
+    this.endereco,
+    this.cidade,
   });
 
   /// Factory para o novo backend Go (JSON plano)
@@ -44,6 +48,8 @@ class Park {
       heroImage: map['imagem_url']?.toString() ?? map['imagem']?.toString() ?? map['hero_image']?.toString(),
       latitude: toDouble(map['latitude'] ?? map['lat']),
       longitude: toDouble(map['longitude'] ?? map['lng']),
+      endereco: map['endereco']?.toString(),
+      cidade: map['cidade']?.toString(),
     );
   }
 }

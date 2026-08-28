@@ -8,6 +8,7 @@ import '../../widgets/app_toast.dart';
 import 'profile_edit_screen.dart';
 import 'preferencias_screen.dart';
 import '../../core/api/api_config.dart';
+import '../../core/checksum.dart';
 
 const _green = Color(0xFF669340);
 const _dark  = Color(0xFF32384A);
@@ -67,9 +68,23 @@ class _UserScreenState extends State<UserScreen> {
         }
 
         final me = snap.data!;
-        final nome = me['nome'] ?? me['name'] ?? '';
+        final nome = (me['nome'] ?? me['name'] ?? '').toString().trim();
         final email = (me['email'] ?? '').toString();
-        final displayName = nome.toString().isEmpty ? email : nome.toString();
+        // Exibe apenas primeiro e último nome, cada palavra capitalizada
+        String displayName;
+        if (nome.isEmpty) {
+          displayName = email;
+        } else {
+          final partes = nome.split(RegExp(r'\s+'));
+          final capitalizar = (String s) =>
+              s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
+          if (partes.length == 1) {
+            displayName = capitalizar(partes[0]);
+          } else {
+            displayName =
+                '${capitalizar(partes.first)} ${capitalizar(partes.last)}';
+          }
+        }
         
         final String? avatarUrl = me['avatar_url'];
 
@@ -259,11 +274,27 @@ class _AvatarEditState extends State<_AvatarEdit> {
   }
 
   Future<void> _pickAndUploadImage() async {
-    final XFile? image = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-    );
-    if (image == null) return; 
+    final XFile? image;
+    try {
+      // Resize no cliente (o backend não redimensiona mais — os bytes enviados
+      // precisam bater com o checksum calculado aqui).
+      image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 300,
+        maxHeight: 300,
+        imageQuality: 60,
+      );
+    } catch (e) {
+      // Android pode lançar PlatformException se a Activity for recriada
+      // sob pressão de memória ou o resultado do picker for perdido.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível abrir a galeria.')),
+        );
+      }
+      return;
+    }
+    if (image == null) return;
 
     setState(() => _isUploading = true);
 
@@ -278,6 +309,7 @@ class _AvatarEditState extends State<_AvatarEdit> {
       }
 
       final bytes = await image.readAsBytes();
+      request.fields['checksum'] = sha256Hex(bytes);
       final multipartFile = http.MultipartFile.fromBytes(
         'avatar',
         bytes,

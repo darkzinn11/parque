@@ -44,8 +44,8 @@ class Review {
       text: map['texto']?.toString(),
       midiaUrl: map['midia_url']?.toString(),
       status: map['status']?.toString() ?? 'Pendente',
-      createdAt: map['created_at'] != null
-          ? DateTime.tryParse(map['created_at'])
+      createdAt: map['created_at'] is String
+          ? DateTime.tryParse(map['created_at'] as String)
           : null,
     );
   }

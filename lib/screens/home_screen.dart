@@ -14,7 +14,6 @@ import '../widgets/app_toast.dart';
 import '../widgets/favorite_button.dart';
 
 import '../data/park_repository.dart';
-import '../data/repositories/map_point_repository.dart';
 import '../data/repositories/go_reservation_repository.dart';
 import '../data/models/park.dart';
 import '../data/models/reservation.dart';
@@ -45,8 +44,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _error;
 
   List<_CardItem> explorar = [];
-  List<_CardItem> divertir = [];
-  List<_CardItem> caminhar = [];
 
   String _query = '';
 
@@ -108,7 +105,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     try {
       final parkRepo = context.read<ParkRepository>();
-      final mapRepo = context.read<MapPointRepository>();
 
       // parques
       final parksRaw = await parkRepo.fetchAll();
@@ -120,29 +116,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         withFavorite: true,
       )).toList();
 
-      // pontos de interesse (divertir e caminhar)
-      final pointsRaw = await mapRepo.fetchAll();
-      
-      final activities = pointsRaw
-        .where((p) => p.categoria == 'divertir')
-        .map((p) => _CardItem(
-          id: p.id, // ID do espaço — navega para detalhes do ponto
-          title: p.nome,
-          image: _toImageUrl(p.imagemUrl) ?? '',
-          status: null,
-          withFavorite: false,
-        )).toList();
-
-      final walks = pointsRaw
-        .where((p) => p.categoria == 'caminhar')
-        .map((p) => _CardItem(
-          id: p.id, // ID do espaço — navega para detalhes do ponto
-          title: p.nome,
-          image: _toImageUrl(p.imagemUrl) ?? '',
-          status: null,
-          withFavorite: false,
-        )).toList();
-
       _allParks = parksRaw;
       if (parksRaw.isNotEmpty) {
         _closestPark = parksRaw.first;
@@ -151,8 +124,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {
         explorar = parks;
-        divertir = activities;
-        caminhar = walks;
         _isLoading = false;
       });
 
@@ -258,11 +229,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     const double exploreCardRadius = 8.0;
 
     final me = context.watch<AuthService>().currentUser;
-    String displayName = _saudacaoDia();
+    final saudacao = _saudacaoDia();
+    String? firstName;
     if (me != null) {
-      final nome = me['name'] ?? me['username'] ?? me['first_name'];
-      if (nome != null && nome.toString().isNotEmpty) {
-        displayName = nome.toString().split(' ').first;
+      final nome = me['nome'] ?? me['name'] ?? me['username'] ?? me['first_name'];
+      if (nome != null && nome.toString().trim().isNotEmpty) {
+        final raw = nome.toString().trim().split(' ').first.toLowerCase();
+        // Capitaliza a 1ª letra — backend pode salvar em caixa alta
+        firstName = raw[0].toUpperCase() + raw.substring(1);
       }
     }
 
@@ -315,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             ),
                                           ),
                                           child: Text.rich(
-                                            key: ValueKey(displayName),
+                                            key: ValueKey(firstName ?? saudacao),
                                             TextSpan(
                                               children: [
                                                 TextSpan(
@@ -327,8 +301,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                     height: headerTitleLineHeight,
                                                   ),
                                                 ),
+                                                // Logado: "Nilo!" em verde — não logado: "Boa noite" em verde
                                                 TextSpan(
-                                                  text: displayName,
+                                                  text: firstName != null
+                                                      ? '$firstName!'
+                                                      : saudacao,
                                                   style: GoogleFonts.poppins(
                                                     fontSize: headerTitleSize,
                                                     fontWeight: FontWeight.w700,
@@ -376,11 +353,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   _QuickAction(
-                                    iconData: Icons.favorite_border,
-                                    label: 'Favoritos',
+                                    iconAsset: 'assets/icons/denuncie.svg',
+                                    label: 'Colabore',
                                     color: kBrandGreen,
-                                    onTap: () => context
-                                        .push(AppRoutes.homeFavorites),
+                                    onTap: () =>
+                                        context.push(AppRoutes.homeDenuncie),
                                   ),
                                   _QuickAction(
                                     iconAsset:
@@ -397,18 +374,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         context.push(AppRoutes.homeEventos),
                                   ),
                                   _QuickAction(
+                                    iconData: Icons.favorite_border,
+                                    label: 'Favoritos',
+                                    color: kBrandGreen,
+                                    onTap: () => context
+                                        .push(AppRoutes.homeFavorites),
+                                  ),
+                                  _QuickAction(
                                     iconAsset: 'assets/icons/info.svg',
                                     label: 'Info',
                                     color: kBrandGreen,
                                     onTap: () =>
                                         context.push(AppRoutes.homeInfo),
-                                  ),
-                                  _QuickAction(
-                                    iconAsset: 'assets/icons/denuncie.svg',
-                                    label: 'Denuncie',
-                                    color: kBrandGreen,
-                                    onTap: () =>
-                                        context.push(AppRoutes.homeDenuncie),
                                   ),
                                 ],
                               ),
@@ -995,9 +972,11 @@ class _NearYouCard extends StatelessWidget {
         ? '${distanceKm!.toStringAsFixed(1).replaceAll('.', ',')} km'
         : '2,4 km';
 
-    final addressStr = park.description != null && park.description!.contains('Rua')
-        ? 'São Luís, MA'
-        : 'Av. Sen. Vitorino Freire, 1000';
+    final addressParts = [park.endereco, park.cidade]
+        .where((e) => e != null && e.trim().isNotEmpty)
+        .map((e) => e!.trim())
+        .toList();
+    final addressStr = addressParts.isNotEmpty ? addressParts.join(', ') : 'São Luís, MA';
 
     return GestureDetector(
       onTap: onTap,

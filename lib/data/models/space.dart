@@ -1,4 +1,5 @@
 // lib/data/models/space.dart
+import 'dart:convert';
 
 class Space {
   final int id;
@@ -16,6 +17,10 @@ class Space {
   final bool permiteEvento;
   final bool permiteReserva;
 
+  /// Contorno do setor desenhado pelo gestor no painel. Cada ponto é [lat, lng].
+  /// null quando o setor não tem polígono cadastrado.
+  final List<List<double>>? areaPolygon;
+
   Space({
     required this.id,
     required this.parkId,
@@ -31,7 +36,37 @@ class Space {
     this.rule,
     this.permiteEvento = false,
     this.permiteReserva = true,
+    this.areaPolygon,
   });
+
+  /// Tolera tanto JSON já decodificado (List) quanto String JSON, e
+  /// aceita pontos como {"lat":..,"lng":..} ou [lat, lng]. Exige 3+ pontos.
+  static List<List<double>>? _parsePolygon(dynamic raw) {
+    if (raw == null) return null;
+    dynamic data = raw;
+    if (raw is String) {
+      if (raw.trim().isEmpty) return null;
+      try {
+        data = jsonDecode(raw);
+      } catch (_) {
+        return null;
+      }
+    }
+    if (data is! List) return null;
+    final pts = <List<double>>[];
+    for (final p in data) {
+      double? lat, lng;
+      if (p is Map) {
+        lat = (p['lat'] as num?)?.toDouble();
+        lng = (p['lng'] as num?)?.toDouble();
+      } else if (p is List && p.length >= 2) {
+        lat = (p[0] as num?)?.toDouble();
+        lng = (p[1] as num?)?.toDouble();
+      }
+      if (lat != null && lng != null) pts.add([lat, lng]);
+    }
+    return pts.length >= 3 ? pts : null;
+  }
 
   factory Space.fromJson(Map<String, dynamic> json) {
     return Space(
@@ -49,6 +84,7 @@ class Space {
       rule: json['rule'] != null ? SpaceRule.fromJson(json['rule'] as Map<String, dynamic>) : null,
       permiteEvento: json['permite_evento'] == true,
       permiteReserva: json['permite_reserva'] != false,
+      areaPolygon: _parsePolygon(json['area_polygon']),
     );
   }
 }

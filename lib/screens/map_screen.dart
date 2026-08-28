@@ -1,5 +1,6 @@
 // lib/screens/map_screen.dart
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -37,6 +38,7 @@ class _MapScreenState extends State<MapScreen> {
   List<Park> _parks = [];
   Set<Marker> _markers = {};
   Position? _userPosition;
+  bool _locationGranted = false;
 
   static const _initial = CameraPosition(
     target: LatLng(-2.5269, -44.2477),
@@ -71,6 +73,10 @@ class _MapScreenState extends State<MapScreen> {
           permission == LocationPermission.deniedForever) {
         return;
       }
+
+      // Permissão concedida: agora é seguro habilitar a camada "minha localização"
+      // do GoogleMap. No Android, ativá-la antes do grant lança PlatformException.
+      if (mounted) setState(() => _locationGranted = true);
 
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.low),
@@ -267,7 +273,7 @@ class _MapScreenState extends State<MapScreen> {
               if (!_mapCtrl.isCompleted) _mapCtrl.complete(c);
             },
             markers: _markers,
-            myLocationEnabled: true,
+            myLocationEnabled: _locationGranted,
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
@@ -765,8 +771,11 @@ class _RoutePickerSheetState extends State<_RoutePickerSheet> {
       name: 'Google Maps',
       assetPath: 'assets/images/maps/google_maps.svg',
       isSvg: true,
-      nativeUrl: (lat, lng) => 'comgooglemaps://?daddr=$lat,$lng&directionsmode=driving',
-      webUrl: (lat, lng) => 'https://maps.google.com/?daddr=$lat,$lng',
+      // iOS usa o scheme comgooglemaps://; Android usa google.navigation:
+      nativeUrl: (lat, lng) => Platform.isIOS
+          ? 'comgooglemaps://?daddr=$lat,$lng&directionsmode=driving'
+          : 'google.navigation:q=$lat,$lng',
+      webUrl: (lat, lng) => 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng',
     ),
   ];
 
@@ -777,8 +786,12 @@ class _RoutePickerSheetState extends State<_RoutePickerSheet> {
       launched = await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
     } catch (_) {}
     if (!launched) {
-      final webUri = Uri.parse(app.webUrl(widget.lat, widget.lng));
-      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      // Fallback web também pode falhar no Android (sem navegador padrão);
+      // protege para não derrubar a tela.
+      try {
+        final webUri = Uri.parse(app.webUrl(widget.lat, widget.lng));
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
     }
     if (mounted) Navigator.pop(context);
   }

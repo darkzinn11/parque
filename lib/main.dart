@@ -23,7 +23,6 @@ import 'data/reviews_repository.dart';
 import 'data/repositories/go_park_repository.dart';
 import 'data/repositories/go_reviews_repository.dart';
 import 'data/repositories/event_repository.dart';
-import 'data/repositories/map_point_repository.dart';
 
 /// ===== CORES/TOKENS =====
 const kGreen = Color(0xFF669340);
@@ -39,10 +38,11 @@ Future<void> main() async {
   await FavoritesService.instance.init();
   unawaited(RunService.instance.loadActivities());
 
-  // Quando o usuário faz login, sobe as atividades locais pendentes para a nuvem
+  // Quando o usuário faz login: sobe pendentes + puxa histórico da nuvem (restore em novo dispositivo)
   AuthService.instance.addListener(() {
     if (AuthService.instance.tokenSync != null) {
       unawaited(RunService.instance.syncPending());
+      unawaited(RunService.instance.pullFromCloud());
     }
   });
 
@@ -90,9 +90,6 @@ class ParquesApp extends StatelessWidget {
         ),
         Provider<EventRepository>(
           create: (_) => GoEventRepository(),
-        ),
-        Provider<MapPointRepository>(
-          create: (_) => GoMapPointRepository(),
         ),
       ],
       child: MaterialApp.router(

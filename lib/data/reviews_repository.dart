@@ -4,7 +4,7 @@ import 'models/review.dart';
 abstract class ReviewsRepository {
   Future<List<Review>> fetchForPark(int parkId, {int limit = 20});
   Future<List<Review>> fetchMineForPark(int parkId);
-  Future<String?> uploadMedia(String filePath);
+  Future<String?> uploadMedia(String filePath, {required int parkId});
   Future<Review?> createReview({
     required int parkId,
     required int rating,

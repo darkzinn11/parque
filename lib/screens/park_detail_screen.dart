@@ -230,7 +230,7 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
                             else
                               const SizedBox.shrink(),
                             Text(
-                              '$dynamicReviewCount avaliações',
+                              '$dynamicReviewCount ${dynamicReviewCount == 1 ? 'avaliação' : 'avaliações'}',
                               style: GoogleFonts.poppins(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
@@ -286,6 +286,38 @@ class _ParkDetailScreenState extends State<ParkDetailScreen> {
                                 ),
                               );
                             },
+                          ),
+                          const SizedBox(height: 24),
+                        ],
+
+                        // Endereço do parque (só se houver)
+                        if (() {
+                          final parts = [park.endereco, park.cidade]
+                              .where((e) => e != null && e.trim().isNotEmpty)
+                              .toList();
+                          return parts.isNotEmpty;
+                        }()) ...[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.place_outlined,
+                                  size: 18, color: kBrandGreen),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  [park.endereco, park.cidade]
+                                      .where((e) =>
+                                          e != null && e.trim().isNotEmpty)
+                                      .map((e) => e!.trim())
+                                      .join(', '),
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 14,
+                                    height: 1.4,
+                                    color: kDarkGray.withValues(alpha: .9),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 24),
                         ],
@@ -1099,6 +1131,7 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
   bool _isUploadingPhoto = false;
   XFile? _selectedPhoto;
   String? _uploadedPhotoUrl;
+  final Set<String> _fieldErrors = {};
 
   final _picker = ImagePicker();
 
@@ -1161,7 +1194,7 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
     });
 
     try {
-      final url = await repo.uploadMedia(file.path);
+      final url = await repo.uploadMedia(file.path, parkId: widget.parkId);
       if (mounted) {
         setState(() {
           _uploadedPhotoUrl = url;
@@ -1183,12 +1216,20 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
       });
 
   Future<void> _submit() async {
-    if (_selectedRating == 0) {
-      AppToast.show(context, 'Selecione uma nota de 1 a 5 estrelas.', type: ToastType.warning);
-      return;
-    }
-    if (_titleController.text.trim().isEmpty) {
-      AppToast.show(context, 'Insira um título para a avaliação.', type: ToastType.warning);
+    final newErrors = <String>{};
+    if (_selectedRating == 0) newErrors.add('rating');
+    if (_titleController.text.trim().isEmpty) newErrors.add('titulo');
+    if (_commentController.text.trim().isEmpty) newErrors.add('comentario');
+
+    if (newErrors.isNotEmpty) {
+      setState(() => _fieldErrors.addAll(newErrors));
+      if (_selectedRating == 0) {
+        AppToast.show(context, 'Selecione uma nota de 1 a 5 estrelas.', type: ToastType.warning);
+      } else if (_titleController.text.trim().isEmpty) {
+        AppToast.show(context, 'Insira um título para a avaliação.', type: ToastType.warning);
+      } else {
+        AppToast.show(context, 'Insira um comentário para a avaliação.', type: ToastType.warning);
+      }
       return;
     }
     if (_isUploadingPhoto) {
@@ -1282,27 +1323,38 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
             const SizedBox(height: 20),
             
             // Estrelas
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(5, (index) {
-                final starNum = index + 1;
-                final isSelected = starNum <= _selectedRating;
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _selectedRating = starNum;
-                    });
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Icon(
-                      isSelected ? Icons.star : Icons.star_border,
-                      size: 40,
-                      color: isSelected ? const Color(0xFFFFB800) : Colors.grey.shade300,
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              decoration: BoxDecoration(
+                border: _fieldErrors.contains('rating')
+                    ? Border.all(color: Colors.red.shade400, width: 1.5)
+                    : null,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  final starNum = index + 1;
+                  final isSelected = starNum <= _selectedRating;
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedRating = starNum;
+                        _fieldErrors.remove('rating');
+                      });
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Icon(
+                        isSelected ? Icons.star : Icons.star_border,
+                        size: 40,
+                        color: isSelected ? const Color(0xFFFFB800) : Colors.grey.shade300,
+                      ),
                     ),
-                  ),
-                );
-              }),
+                  );
+                }),
+              ),
             ),
             const SizedBox(height: 24),
 
@@ -1312,12 +1364,13 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
               style: GoogleFonts.poppins(
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
-                color: kDarkGray,
+                color: _fieldErrors.contains('titulo') ? Colors.red.shade600 : kDarkGray,
               ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _titleController,
+              onChanged: (_) => setState(() => _fieldErrors.remove('titulo')),
               decoration: InputDecoration(
                 hintText: 'O que você está procurando?',
                 hintStyle: GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
@@ -1326,11 +1379,16 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: kBrandGreen),
+                  borderSide: BorderSide(
+                    color: _fieldErrors.contains('titulo') ? Colors.red.shade400 : kBrandGreen,
+                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: kBrandGreen, width: 1.5),
+                  borderSide: BorderSide(
+                    color: _fieldErrors.contains('titulo') ? Colors.red.shade400 : kBrandGreen,
+                    width: 1.5,
+                  ),
                 ),
               ),
             ),
@@ -1342,13 +1400,14 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
               style: GoogleFonts.poppins(
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
-                color: kDarkGray,
+                color: _fieldErrors.contains('comentario') ? Colors.red.shade600 : kDarkGray,
               ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _commentController,
               maxLines: 4,
+              onChanged: (_) => setState(() => _fieldErrors.remove('comentario')),
               decoration: InputDecoration(
                 hintText: 'O que você está procurando?',
                 hintStyle: GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
@@ -1357,11 +1416,16 @@ class _AddReviewBottomSheetState extends State<_AddReviewBottomSheet> {
                 contentPadding: const EdgeInsets.all(16),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: kBrandGreen),
+                  borderSide: BorderSide(
+                    color: _fieldErrors.contains('comentario') ? Colors.red.shade400 : kBrandGreen,
+                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: kBrandGreen, width: 1.5),
+                  borderSide: BorderSide(
+                    color: _fieldErrors.contains('comentario') ? Colors.red.shade400 : kBrandGreen,
+                    width: 1.5,
+                  ),
                 ),
               ),
             ),

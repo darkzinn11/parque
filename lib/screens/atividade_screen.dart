@@ -97,6 +97,14 @@ class _AtividadeScreenState extends State<AtividadeScreen> {
         final filteredActivities =
             activities.where(_matchesSelectedType).toList();
 
+        // Atividades da semana atual (todos os tipos — usado no modal "Ver tudo")
+        final now = DateTime.now();
+        final startOfWeek =
+            DateTime(now.year, now.month, now.day - (now.weekday - 1));
+        final weekActivities = run.activities
+            .where((a) => !a.startTime.isBefore(startOfWeek))
+            .toList();
+
         return Scaffold(
           backgroundColor: Colors.white,
           body: CustomScrollView(
@@ -109,6 +117,8 @@ class _AtividadeScreenState extends State<AtividadeScreen> {
                   typeIcons: _typeIcons,
                   onTypeChanged: (i) => setState(() => _selectedType = i),
                   onStart: () async {
+                    // Captura contagem antes para detectar se nova atividade foi salva
+                    final prevCount = run.activities.length;
                     final result = await context.pushNamed(
                       'atividade_tracking',
                       extra: _typeKeys[_selectedType],
@@ -117,7 +127,8 @@ class _AtividadeScreenState extends State<AtividadeScreen> {
                       await Future.delayed(
                           const Duration(milliseconds: 300));
                       if (!context.mounted) return;
-                      if (run.activities.isNotEmpty) {
+                      // Só abre modal se uma nova atividade foi de fato salva
+                      if (run.activities.length > prevCount) {
                         final latest = run.activities.first;
                         showModalBottomSheet(
                           context: context,
@@ -147,6 +158,7 @@ class _AtividadeScreenState extends State<AtividadeScreen> {
                     distance: weekDistance,
                     duration: weekDuration,
                     count: weekCount,
+                    weekActivities: weekActivities,
                   ),
                 ),
               ),
@@ -156,7 +168,7 @@ class _AtividadeScreenState extends State<AtividadeScreen> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                   child: Text(
-                    'Histórico Recente',
+                    'Histórico',
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -178,8 +190,7 @@ class _AtividadeScreenState extends State<AtividadeScreen> {
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
                   sliver: SliverList.separated(
-                    itemCount:
-                        filteredActivities.length.clamp(0, 20),
+                    itemCount: filteredActivities.length,
                     separatorBuilder: (_, __) =>
                         const SizedBox(height: 12),
                     itemBuilder: (ctx, i) {
@@ -215,84 +226,162 @@ class _AtividadeScreenState extends State<AtividadeScreen> {
     );
   }
 
-  // ── "Ver tudo" — corrigido: sem Expanded + Spacer dentro do modal ─────
+  // ── "Ver tudo" — lista percursos da semana + métricas agregadas ──────
   void _openWeekSummary(
     BuildContext context, {
     required double distance,
     required Duration duration,
     required int count,
+    required List<RunActivity> weekActivities,
   }) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: false,
+      isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Handle
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFDDDDDD),
-                  borderRadius: BorderRadius.circular(99),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.65,
+        maxChildSize: 0.92,
+        minChildSize: 0.4,
+        builder: (ctx, scrollController) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDDDDDD),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
                 ),
               ),
-            ),
-            const Text(
-              'Resumo da semana',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                color: darkText,
+              const SizedBox(height: 16),
+
+              // Cabeçalho fixo
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Atividades desta semana',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: darkText,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    IntrinsicHeight(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _SummaryStatCard(
+                              label: 'Distância',
+                              value: distance.toStringAsFixed(2),
+                              unit: 'km',
+                              icon: Icons.map_outlined,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _SummaryStatCard(
+                              label: 'Tempo',
+                              value: _fmtWeekDuration(duration),
+                              unit: '',
+                              icon: Icons.timer_outlined,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _SummaryStatCard(
+                              label: 'Atividades',
+                              value: '$count',
+                              unit: '',
+                              icon: Icons.check_circle_outline,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Percursos',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: lightText,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-            // Cards em linha com altura fixa — sem Spacer
-            IntrinsicHeight(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _SummaryStatCard(
-                      label: 'Distância',
-                      value: '${distance.toStringAsFixed(2)}',
-                      unit: 'km',
-                      icon: Icons.map_outlined,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _SummaryStatCard(
-                      label: 'Tempo',
-                      value: _fmtWeekDuration(duration),
-                      unit: '',
-                      icon: Icons.timer_outlined,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _SummaryStatCard(
-                      label: 'Atividades',
-                      value: '$count',
-                      unit: '',
-                      icon: Icons.check_circle_outline,
-                    ),
-                  ),
-                ],
+
+              // Lista rolável
+              Expanded(
+                child: weekActivities.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Text(
+                            'Nenhuma atividade registrada nesta semana.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        controller: scrollController,
+                        padding:
+                            const EdgeInsets.fromLTRB(20, 0, 20, 32),
+                        itemCount: weekActivities.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 10),
+                        itemBuilder: (ctx2, i) {
+                          final a = weekActivities[i];
+                          return GestureDetector(
+                            onTap: () {
+                              // Abre detalhe em cima do modal da semana
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                backgroundColor: Colors.transparent,
+                                builder: (_) => ActivityDetailModal(
+                                  activity: a,
+                                  dateString: _fmtDate(a.startTime),
+                                  durationString:
+                                      _fmtShortDuration(a.duration),
+                                ),
+                              );
+                            },
+                            child: _HistoryItem(
+                              date: _fmtDate(a.startTime),
+                              distance:
+                                  '${a.distanceKm.toStringAsFixed(2)} km',
+                              time: _fmtShortDuration(a.duration),
+                              activityType: a.activityType,
+                              pace: a.pace,
+                            ),
+                          );
+                        },
+                      ),
               ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }

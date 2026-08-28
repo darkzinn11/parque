@@ -6,6 +6,13 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import 'dart:convert';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
+
+import '../../core/api/api_config.dart';
+import '../../core/checksum.dart';
 import '../../core/formatters.dart';
 import '../../data/models/event_request.dart';
 import '../../data/models/park_activity_type.dart';
@@ -65,6 +72,11 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   bool _apoioBPA = false;
   bool _isSubmitting = false;
   final _scrollController = ScrollController();
+
+  // PDF opcional
+  PlatformFile? _pdfFile;
+  // ignore: unused_field — usado via setState para disparar rebuild do loading indicator
+  bool _uploadingPdf = false;
 
   @override
   void initState() {
@@ -372,8 +384,60 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     );
   }
 
+  Future<String?> _uploadPdf() async {
+    if (_pdfFile == null) return null;
+    // Prefere bytes em memória (withData: true); fallback para path se necessário
+    final Uint8List bytes;
+    if (_pdfFile!.bytes != null) {
+      bytes = _pdfFile!.bytes!;
+    } else if (_pdfFile!.path != null) {
+      bytes = await File(_pdfFile!.path!).readAsBytes();
+    } else {
+      return null;
+    }
+    final checksum = sha256Hex(bytes);
+    final token = AuthService.instance.tokenSync;
+    final uri = Uri.parse('${ApiConfig.baseUrl}/upload');
+    final req = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $token'
+      ..fields['entity_type'] = 'event_request'
+      ..fields['checksum'] = checksum
+      ..files.add(http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: _pdfFile!.name,
+      ));
+    try {
+      final streamed = await req.send();
+      final res = await http.Response.fromStream(streamed);
+      if (res.statusCode == 200) {
+        final data = _jsonDecode(res.body);
+        return data['url'] as String?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Map<String, dynamic> _jsonDecode(String body) {
+    // ignore: avoid_dynamic_calls
+    return (jsonDecode(body) as Map<String, dynamic>);
+  }
+
   Future<void> _submit() async {
     setState(() => _isSubmitting = true);
+
+    // Faz upload do PDF antes de enviar, se houver arquivo selecionado
+    String pdfUrl = '';
+    if (_pdfFile != null) {
+      setState(() => _uploadingPdf = true);
+      pdfUrl = await _uploadPdf() ?? '';
+      if (mounted) setState(() => _uploadingPdf = false);
+      if (pdfUrl.isEmpty && mounted) {
+        setState(() => _isSubmitting = false);
+        AppToast.show(context, 'Erro ao enviar o PDF. Tente novamente.', type: ToastType.error);
+        return;
+      }
+    }
 
     final String tipoAtividade = _activityTypes.isEmpty
         ? _tipoAtividadeFreeCtrl.text.trim()
@@ -386,6 +450,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       'nome_responsavel':    _nomeCtrl.text.trim(),
       'contato_responsavel': _contatoCtrl.text.trim(),
       'apoio_bpa':           _apoioBPA,
+      if (pdfUrl.isNotEmpty) 'pdf_url': pdfUrl,
     };
 
     if (widget.isEditing) {
@@ -582,6 +647,109 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                       if (!v.contains('@') || !v.contains('.')) return 'E-mail inválido';
                       return null;
                     },
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Card PDF opcional
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () async {
+                      if (_pdfFile != null) return;
+                      final ctx = context;
+                      try {
+                        final result = await FilePicker.platform.pickFiles(
+                          type: FileType.custom,
+                          allowedExtensions: ['pdf'],
+                          allowMultiple: false,
+                          withData: true,
+                        );
+                        if (result != null && result.files.isNotEmpty && mounted) {
+                          setState(() => _pdfFile = result.files.first);
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          AppToast.show(ctx,
+                              'Não foi possível abrir o seletor de arquivos.',
+                              type: ToastType.error);
+                        }
+                      }
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _cardBg,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: _pdfFile != null
+                              ? _green.withValues(alpha: 0.5)
+                              : const Color(0xFFE0E0E0),
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 14),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: _pdfFile != null
+                                  ? _green.withValues(alpha: 0.12)
+                                  : const Color(0xFFEEEEEE),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              _pdfFile != null
+                                  ? Icons.picture_as_pdf_rounded
+                                  : Icons.upload_file_rounded,
+                              color: _pdfFile != null ? _green : _lightGray,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Documento PDF',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: _dark,
+                                  ),
+                                ),
+                                Text(
+                                  _pdfFile != null
+                                      ? _pdfFile!.name
+                                      : 'Opcional — anexe informações adicionais',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    color: _pdfFile != null
+                                        ? _green
+                                        : _lightGray,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_pdfFile != null)
+                            GestureDetector(
+                              onTap: () => setState(() => _pdfFile = null),
+                              child: const Padding(
+                                padding: EdgeInsets.only(left: 8),
+                                child: Icon(Icons.close_rounded,
+                                    size: 18, color: Color(0xFFAAAAAA)),
+                              ),
+                            )
+                          else
+                            const Icon(Icons.chevron_right_rounded,
+                                color: Color(0xFFCCCCCC), size: 20),
+                        ],
+                      ),
+                    ),
                   ),
 
                   const SizedBox(height: 16),
