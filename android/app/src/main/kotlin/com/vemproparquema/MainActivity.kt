@@ -1,4 +1,4 @@
-package com.example.parque
+package com.vemproparquema
 
 import io.flutter.embedding.android.FlutterActivity
 

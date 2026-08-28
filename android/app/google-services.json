@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "93554196521",
+    "project_id": "vem-pro-parque-16f7e",
+    "storage_bucket": "vem-pro-parque-16f7e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:93554196521:android:c78b00b65e17fa49df5c38",
+        "android_client_info": {
+          "package_name": "com.vemproparquema"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChtYpY1SsCLib_mLNkz_lbBQJ2At9i_7s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
